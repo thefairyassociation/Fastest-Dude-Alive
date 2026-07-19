@@ -1,4 +1,4 @@
-# Fastest Dude Alive: Neon Velocity
+# Fastest Dude Alive
 
 > A browser-first, original speedster sandbox built with TypeScript and Babylon.js.
 
