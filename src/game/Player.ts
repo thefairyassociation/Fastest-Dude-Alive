@@ -40,7 +40,7 @@ export class Player {
   private readonly rightLeg: Mesh;
   private stride = 0;
 
-  constructor(private readonly scene: Scene, spawn: Vector3) {
+  constructor(scene: Scene, spawn: Vector3) {
     this.root = new TransformNode("speedster", scene);
     this.root.position.copyFrom(spawn);
 
