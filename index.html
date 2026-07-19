@@ -24,63 +24,54 @@
       </section>
 
       <section id="hud" class="hud is-hidden" aria-label="Game status">
-        <header class="topbar">
-          <div class="wordmark">
-            <span class="wordmark-kicker">Prototype 01</span>
-            <strong>Fastest Dude Alive</strong>
-          </div>
-          <div id="renderer-badge" class="renderer-badge">Detecting GPU</div>
-        </header>
-
-        <aside class="objective-card">
-          <span class="panel-label">Current signal</span>
-          <strong id="objective-title">Free roam</strong>
-          <p id="objective-detail">Press T to launch the Meridian Loop.</p>
-        </aside>
-
-        <aside class="status-card">
-          <div class="meter-row">
-            <span>Vitality</span>
-            <span id="health-label">100</span>
-          </div>
-          <div class="meter"><span id="health-fill" class="health-fill"></span></div>
-          <div class="meter-row">
-            <span>Momentum</span>
-            <span id="charge-label">50</span>
-          </div>
-          <div class="meter"><span id="charge-fill" class="charge-fill"></span></div>
-          <div id="combo" class="combo">CHAIN ×1</div>
-        </aside>
-
-        <aside class="speed-card">
-          <span class="panel-label">Velocity</span>
-          <div class="speed-readout">
-            <strong id="speed-value">0</strong>
-            <span>km/h</span>
-          </div>
-          <div class="speed-bar"><span id="speed-fill"></span></div>
-          <p id="speed-tier">STILL</p>
-        </aside>
-
-        <aside class="abilities" aria-label="Abilities">
-          <div id="ability-dash"><kbd>SPACE</kbd><span>Phase Dash</span></div>
-          <div id="ability-bolt"><kbd>E</kbd><span>Arc Bolt</span></div>
-          <div id="ability-pulse"><kbd>Q</kbd><span>Kinetic Pulse</span></div>
-          <div id="ability-focus"><kbd>F</kbd><span>Focus Time</span></div>
-        </aside>
-
-        <div class="minimap-frame">
-          <span>MERIDIAN / LIVE</span>
-          <canvas id="minimap" width="220" height="220" aria-label="City minimap"></canvas>
+        <div class="wordmark">
+          <strong>Fastest Dude Alive</strong>
+          <span id="renderer-badge">Detecting GPU</span>
         </div>
 
-        <div class="reticle" aria-hidden="true"><span></span></div>
+        <div class="objective-pill">
+          <strong id="objective-title">Free roam</strong>
+          <span id="objective-detail">Press T to launch the Meridian Loop.</span>
+        </div>
+
+        <div class="minimap-wrap">
+          <canvas id="minimap" width="360" height="360" aria-label="Local minimap"></canvas>
+        </div>
+
+        <div class="cluster">
+          <div id="combo" class="combo">×1 chain</div>
+          <div class="bar-row">
+            <span class="bar-label">Vit</span>
+            <div class="meter"><span id="health-fill" class="health-fill"></span></div>
+            <span id="health-label" class="bar-value">100</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-label">Mom</span>
+            <div class="meter"><span id="charge-fill" class="charge-fill"></span></div>
+            <span id="charge-label" class="bar-value">50</span>
+          </div>
+          <div class="speed-readout">
+            <strong id="speed-value">0</strong>
+            <span class="unit">km/h</span>
+            <span id="speed-tier">Still</span>
+          </div>
+          <div class="speed-bar"><span id="speed-fill"></span></div>
+        </div>
+
+        <div class="abilities" aria-label="Abilities">
+          <div id="ability-dash" class="ability"><kbd>Spc</kbd><span>Dash</span></div>
+          <div id="ability-bolt" class="ability"><kbd>E</kbd><span>Bolt</span></div>
+          <div id="ability-pulse" class="ability"><kbd>Q</kbd><span>Pulse</span></div>
+          <div id="ability-focus" class="ability"><kbd>F</kbd><span>Focus</span></div>
+        </div>
+
+        <div class="reticle" aria-hidden="true"></div>
         <div id="toast" class="toast" aria-live="polite"></div>
-        <div id="focus-banner" class="focus-banner">FOCUS TIME</div>
+        <div id="focus-banner" class="focus-banner"><span>Focus time</span></div>
 
         <div id="capture-hint" class="capture-hint">
           <strong>Click to enter the city</strong>
-          <span>WASD run · Shift sprint · Mouse look · T time trial</span>
+          <span>WASD run · Shift sprint · Space dash · T time trial</span>
         </div>
       </section>
 

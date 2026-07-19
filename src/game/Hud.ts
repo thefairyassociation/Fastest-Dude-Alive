@@ -51,7 +51,7 @@ export class Hud {
     this.chargeLabel.textContent = Math.floor(player.charge).toString();
     this.chargeFill.style.transform = `scaleX(${player.charge / 100})`;
 
-    this.combo.textContent = `CHAIN ×${player.combo}`;
+    this.combo.textContent = `×${player.combo} chain`;
     this.combo.classList.toggle("active", player.combo > 1);
 
     const objective = trial.objective();
@@ -85,61 +85,109 @@ export class Hud {
 
   private drawMap(player: Player, enemies: Enemy[], trial: TimeTrial): void {
     const { context: ctx, minimap } = this;
-    const width = minimap.width;
-    const height = minimap.height;
-    const map = (value: number) => (value / (this.cityExtent * 2) + 0.5) * width;
+    const size = minimap.width;
+    const half = size / 2;
+    const range = 290; // meters from the player to the map edge
+    const scale = half / range;
+    const px = player.root.position.x;
+    const pz = player.root.position.z;
+    const toX = (x: number) => half + (x - px) * scale;
+    const toY = (z: number) => half - (z - pz) * scale;
 
-    ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "rgba(15, 16, 18, 0.94)";
-    ctx.fillRect(0, 0, width, height);
+    ctx.clearRect(0, 0, size, size);
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(half, half, half, 0, Math.PI * 2);
+    ctx.clip();
 
-    ctx.strokeStyle = "rgba(235, 238, 240, 0.1)";
-    ctx.lineWidth = 1;
-    for (let road = -1275; road <= 1275; road += 150) {
-      const pixel = map(road + 75);
-      ctx.beginPath();
-      ctx.moveTo(pixel, 0);
-      ctx.lineTo(pixel, height);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(0, pixel);
-      ctx.lineTo(width, pixel);
-      ctx.stroke();
+    ctx.fillStyle = "rgba(12, 13, 15, 0.72)";
+    ctx.fillRect(0, 0, size, size);
+
+    // Road strips around the player (roads run at (k - 0.5) * 150).
+    ctx.fillStyle = "rgba(255, 255, 255, 0.09)";
+    const roadHalf = 20 * scale;
+    const kMin = Math.floor((px - range) / 150 + 0.5);
+    const kMax = Math.ceil((px + range) / 150 + 0.5);
+    for (let k = kMin; k <= kMax; k += 1) {
+      const road = (k - 0.5) * 150;
+      if (Math.abs(road) > this.cityExtent) continue;
+      ctx.fillRect(toX(road) - roadHalf, 0, roadHalf * 2, size);
+    }
+    const kzMin = Math.floor((pz - range) / 150 + 0.5);
+    const kzMax = Math.ceil((pz + range) / 150 + 0.5);
+    for (let k = kzMin; k <= kzMax; k += 1) {
+      const road = (k - 0.5) * 150;
+      if (Math.abs(road) > this.cityExtent) continue;
+      ctx.fillRect(0, toY(road) - roadHalf, size, roadHalf * 2);
     }
 
+    // Fade everything beyond the city bounds.
+    ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
+    if (px - range < -this.cityExtent) ctx.fillRect(0, 0, toX(-this.cityExtent), size);
+    if (px + range > this.cityExtent) ctx.fillRect(toX(this.cityExtent), 0, size, size);
+    if (pz + range > this.cityExtent) ctx.fillRect(0, 0, size, toY(this.cityExtent));
+    if (pz - range < -this.cityExtent) ctx.fillRect(0, toY(-this.cityExtent), size, size);
+
+    // Active checkpoint: marker in range, edge chevron when out of range.
     const checkpoint = trial.current;
     if (checkpoint) {
-      ctx.beginPath();
-      ctx.arc(map(checkpoint.x), map(checkpoint.z), 5, 0, Math.PI * 2);
-      ctx.strokeStyle = "#f2a33c";
-      ctx.lineWidth = 2;
-      ctx.stroke();
+      const dx = checkpoint.x - px;
+      const dz = checkpoint.z - pz;
+      const distance = Math.hypot(dx, dz);
+      if (distance * scale < half - 16) {
+        ctx.beginPath();
+        ctx.arc(toX(checkpoint.x), toY(checkpoint.z), 7, 0, Math.PI * 2);
+        ctx.strokeStyle = "#f2a33c";
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      } else {
+        const angle = Math.atan2(-dz, dx);
+        const ex = half + Math.cos(angle) * (half - 14);
+        const ey = half + Math.sin(angle) * (half - 14);
+        ctx.save();
+        ctx.translate(ex, ey);
+        ctx.rotate(angle);
+        ctx.fillStyle = "#f2a33c";
+        ctx.beginPath();
+        ctx.moveTo(8, 0);
+        ctx.lineTo(-4, -6);
+        ctx.lineTo(-4, 6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
     }
 
     ctx.fillStyle = "#e5484d";
     for (const enemy of enemies) {
       if (!enemy.alive) continue;
+      const dx = enemy.position.x - px;
+      const dz = enemy.position.z - pz;
+      if (Math.hypot(dx, dz) > range) continue;
       ctx.beginPath();
-      ctx.arc(map(enemy.position.x), map(enemy.position.z), 2.2, 0, Math.PI * 2);
+      ctx.arc(toX(enemy.position.x), toY(enemy.position.z), 3.5, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    const playerX = map(player.root.position.x);
-    const playerY = map(player.root.position.z);
-    const yaw = player.root.rotation.y;
+    // Player arrow at the center, rotated to heading (north-up map).
     ctx.save();
-    ctx.translate(playerX, playerY);
-    ctx.rotate(-yaw);
+    ctx.translate(half, half);
+    ctx.rotate(player.root.rotation.y);
     ctx.fillStyle = "#f5c76a";
-    ctx.shadowColor = "#f5c76a";
-    ctx.shadowBlur = 8;
     ctx.beginPath();
-    ctx.moveTo(0, -7);
-    ctx.lineTo(5, 6);
-    ctx.lineTo(0, 3);
-    ctx.lineTo(-5, 6);
+    ctx.moveTo(0, -10);
+    ctx.lineTo(7, 8);
+    ctx.lineTo(0, 4);
+    ctx.lineTo(-7, 8);
     ctx.closePath();
     ctx.fill();
+    ctx.restore();
+
+    ctx.fillStyle = "rgba(238, 240, 241, 0.5)";
+    ctx.font = "600 13px Inter, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("N", half, 20);
+
     ctx.restore();
   }
 }

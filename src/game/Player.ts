@@ -50,6 +50,8 @@ export class Player {
   private readonly hipR: TransformNode;
   private readonly kneeL: TransformNode;
   private readonly kneeR: TransformNode;
+  private readonly ankleL: TransformNode;
+  private readonly ankleR: TransformNode;
   private stride = 0;
   private lifetime = 0;
 
@@ -79,6 +81,7 @@ export class Player {
 
     const visorGlass = new StandardMaterial("visor-glass", scene);
     visorGlass.diffuseColor = Color3.FromHexString("#11161b");
+    visorGlass.emissiveColor = Color3.FromHexString("#1c2833");
     visorGlass.specularColor = new Color3(0.85, 0.87, 0.9);
     visorGlass.specularPower = 128;
 
@@ -108,22 +111,42 @@ export class Player {
     this.upper.parent = this.body;
     this.upper.position.y = 2.38;
 
-    const torso = MeshBuilder.CreateCapsule(
-      "hero-torso",
-      { height: 1.56, radius: 0.4, tessellation: 12 },
+    // Layered chest-over-waist gives the athletic V-taper a single capsule
+    // can't: broad upper chest, slimmer core.
+    const waist = MeshBuilder.CreateCapsule(
+      "hero-waist",
+      { height: 1.24, radius: 0.32, tessellation: 12 },
       scene,
     );
-    torso.position.y = 0.58;
-    torso.scaling.set(1.08, 1, 0.7);
-    add(torso, suit, this.upper);
+    waist.position.y = 0.4;
+    waist.scaling.set(1.05, 1, 0.78);
+    add(waist, suit, this.upper);
+
+    const chest = MeshBuilder.CreateCapsule(
+      "hero-chest",
+      { height: 0.98, radius: 0.44, tessellation: 12 },
+      scene,
+    );
+    chest.position.y = 0.84;
+    chest.scaling.set(1.12, 1, 0.76);
+    add(chest, suit, this.upper);
+
+    const chestPlate = MeshBuilder.CreateBox(
+      "hero-chest-plate",
+      { width: 0.54, height: 0.34, depth: 0.1 },
+      scene,
+    );
+    chestPlate.position.set(0, 0.92, 0.31);
+    chestPlate.rotation.x = 0.16;
+    add(chestPlate, suitDark, this.upper);
 
     const belt = MeshBuilder.CreateCylinder(
       "hero-belt",
-      { height: 0.12, diameter: 0.84, tessellation: 14 },
+      { height: 0.1, diameter: 0.7, tessellation: 14 },
       scene,
     );
-    belt.position.y = -0.06;
-    belt.scaling.z = 0.8;
+    belt.position.y = -0.1;
+    belt.scaling.set(1.02, 1, 0.78);
     add(belt, trim, this.upper);
 
     const emblem = MeshBuilder.CreateCylinder(
@@ -153,17 +176,40 @@ export class Player {
     add(cowl, suit, this.head);
 
     const jaw = MeshBuilder.CreateSphere("hero-jaw", { diameter: 0.42, segments: 10 }, scene);
-    jaw.position.set(0, -0.02, 0.13);
+    jaw.position.set(0, -0.05, 0.16);
     jaw.scaling.set(0.86, 0.66, 0.86);
     add(jaw, skin, this.head);
 
+    // Wraparound visor: front pane plus two angled side wings.
     const visor = MeshBuilder.CreateBox(
       "hero-visor",
-      { width: 0.46, height: 0.13, depth: 0.1 },
+      { width: 0.42, height: 0.12, depth: 0.08 },
       scene,
     );
-    visor.position.set(0, 0.17, 0.28);
+    visor.position.set(0, 0.17, 0.27);
     add(visor, visorGlass, this.head);
+
+    for (const side of [-1, 1] as const) {
+      const wing = MeshBuilder.CreateBox(
+        `hero-visor-wing-${side < 0 ? "l" : "r"}`,
+        { width: 0.17, height: 0.11, depth: 0.05 },
+        scene,
+      );
+      wing.position.set(side * 0.23, 0.17, 0.18);
+      wing.rotation.y = side * 0.65;
+      add(wing, visorGlass, this.head);
+
+      // Swept aero fins along the cowl in place of ears.
+      const fin = MeshBuilder.CreateBox(
+        `hero-cowl-fin-${side < 0 ? "l" : "r"}`,
+        { width: 0.04, height: 0.13, depth: 0.3 },
+        scene,
+      );
+      fin.position.set(side * 0.26, 0.3, -0.02);
+      fin.rotation.x = -0.35;
+      fin.rotation.z = side * 0.28;
+      add(fin, trim, this.head);
+    }
 
     // Arms: shoulder pivot -> upper arm -> elbow pivot -> forearm + hand.
     const buildArm = (side: -1 | 1): { shoulder: TransformNode; elbow: TransformNode } => {
@@ -174,15 +220,16 @@ export class Player {
 
       const deltoid = MeshBuilder.CreateSphere(
         `hero-deltoid-${label}`,
-        { diameter: 0.36, segments: 8 },
+        { diameter: 0.4, segments: 10 },
         scene,
       );
       deltoid.position.y = 0.02;
+      deltoid.scaling.set(0.95, 1.05, 0.95);
       add(deltoid, suit, shoulder);
 
       const upperArm = MeshBuilder.CreateCapsule(
         `hero-upper-arm-${label}`,
-        { height: 0.74, radius: 0.135, tessellation: 8 },
+        { height: 0.76, radius: 0.14, tessellation: 10 },
         scene,
       );
       upperArm.position.y = -0.36;
@@ -192,21 +239,30 @@ export class Player {
       elbow.parent = shoulder;
       elbow.position.y = -0.74;
 
+      const elbowPad = MeshBuilder.CreateSphere(
+        `hero-elbow-pad-${label}`,
+        { diameter: 0.23, segments: 8 },
+        scene,
+      );
+      add(elbowPad, suitDark, elbow);
+
       const forearm = MeshBuilder.CreateCapsule(
         `hero-forearm-${label}`,
-        { height: 0.68, radius: 0.115, tessellation: 8 },
+        { height: 0.68, radius: 0.115, tessellation: 10 },
         scene,
       );
       forearm.position.y = -0.32;
+      forearm.scaling.set(1, 1, 1.08);
       add(forearm, suitDark, elbow);
 
+      // Flattened fist rather than a ball.
       const hand = MeshBuilder.CreateSphere(
         `hero-hand-${label}`,
-        { diameter: 0.19, segments: 8 },
+        { diameter: 0.22, segments: 8 },
         scene,
       );
-      hand.position.y = -0.68;
-      hand.scaling.set(0.85, 1.1, 0.85);
+      hand.position.y = -0.7;
+      hand.scaling.set(0.72, 1.05, 0.55);
       add(hand, suitDark, elbow);
 
       return { shoulder, elbow };
@@ -220,7 +276,7 @@ export class Player {
     this.elbowR = armR.elbow;
 
     // Legs: hip pivot -> thigh -> knee pivot -> shin + boot.
-    const buildLeg = (side: -1 | 1): { hip: TransformNode; knee: TransformNode } => {
+    const buildLeg = (side: -1 | 1): { hip: TransformNode; knee: TransformNode; ankle: TransformNode } => {
       const label = side < 0 ? "l" : "r";
       const hip = new TransformNode(`hero-hip-${label}`, scene);
       hip.parent = this.body;
@@ -238,31 +294,56 @@ export class Player {
       knee.parent = hip;
       knee.position.y = -0.98;
 
+      const kneePad = MeshBuilder.CreateSphere(
+        `hero-knee-pad-${label}`,
+        { diameter: 0.27, segments: 8 },
+        scene,
+      );
+      kneePad.position.z = 0.05;
+      kneePad.scaling.y = 1.1;
+      add(kneePad, suitDark, knee);
+
       const shin = MeshBuilder.CreateCapsule(
         `hero-shin-${label}`,
-        { height: 0.92, radius: 0.145, tessellation: 8 },
+        { height: 0.92, radius: 0.15, tessellation: 10 },
         scene,
       );
       shin.position.y = -0.44;
+      shin.scaling.set(1, 1, 1.14);
       add(shin, suitDark, knee);
 
-      const boot = MeshBuilder.CreateBox(
-        `hero-boot-${label}`,
-        { width: 0.26, height: 0.16, depth: 0.56 },
+      const ankle = new TransformNode(`hero-ankle-${label}`, scene);
+      ankle.parent = knee;
+      ankle.position.y = -0.9;
+
+      const heel = MeshBuilder.CreateBox(
+        `hero-heel-${label}`,
+        { width: 0.25, height: 0.15, depth: 0.34 },
         scene,
       );
-      boot.position.set(0, -0.92, 0.12);
-      add(boot, suitDark, knee);
+      heel.position.set(0, -0.03, 0.02);
+      add(heel, suitDark, ankle);
 
-      return { hip, knee };
+      const toe = MeshBuilder.CreateBox(
+        `hero-toe-${label}`,
+        { width: 0.23, height: 0.12, depth: 0.28 },
+        scene,
+      );
+      toe.position.set(0, -0.045, 0.3);
+      toe.rotation.x = 0.06;
+      add(toe, suitDark, ankle);
+
+      return { hip, knee, ankle };
     };
 
     const legL = buildLeg(-1);
     const legR = buildLeg(1);
     this.hipL = legL.hip;
     this.kneeL = legL.knee;
+    this.ankleL = legL.ankle;
     this.hipR = legR.hip;
     this.kneeR = legR.knee;
+    this.ankleR = legR.ankle;
 
     // Faint slipstream instead of a neon light ribbon: pale, translucent
     // streaks that read as displaced air at speed.
@@ -468,8 +549,12 @@ export class Player {
     const legAmp = 0.32 + pace * 0.78;
     this.hipL.rotation.x = -swingL * legAmp;
     this.hipR.rotation.x = -swingR * legAmp;
-    this.kneeL.rotation.x = 0.14 + Math.max(0, Math.sin(p - 1.9)) * (0.4 + pace * 1.25);
-    this.kneeR.rotation.x = 0.14 + Math.max(0, Math.sin(p + Math.PI - 1.9)) * (0.4 + pace * 1.25);
+    const kneeBase = 0.05 + pace * 0.14;
+    this.kneeL.rotation.x = kneeBase + Math.max(0, Math.sin(p - 1.9)) * (0.4 + pace * 1.25);
+    this.kneeR.rotation.x = kneeBase + Math.max(0, Math.sin(p + Math.PI - 1.9)) * (0.4 + pace * 1.25);
+    // Plantar flexion on the trailing leg sells the push-off.
+    this.ankleL.rotation.x = 0.06 + Math.max(0, -swingL) * (0.18 + pace * 0.5);
+    this.ankleR.rotation.x = 0.06 + Math.max(0, -swingR) * (0.18 + pace * 0.5);
 
     const armAmp = 0.22 + pace * 0.62;
     this.shoulderL.rotation.x = -swingR * armAmp;
