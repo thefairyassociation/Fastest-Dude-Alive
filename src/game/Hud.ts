@@ -90,10 +90,10 @@ export class Hud {
     const map = (value: number) => (value / (this.cityExtent * 2) + 0.5) * width;
 
     ctx.clearRect(0, 0, width, height);
-    ctx.fillStyle = "rgba(7, 8, 18, 0.96)";
+    ctx.fillStyle = "rgba(15, 16, 18, 0.94)";
     ctx.fillRect(0, 0, width, height);
 
-    ctx.strokeStyle = "rgba(116, 222, 239, 0.12)";
+    ctx.strokeStyle = "rgba(235, 238, 240, 0.1)";
     ctx.lineWidth = 1;
     for (let road = -1275; road <= 1275; road += 150) {
       const pixel = map(road + 75);
@@ -111,12 +111,12 @@ export class Hud {
     if (checkpoint) {
       ctx.beginPath();
       ctx.arc(map(checkpoint.x), map(checkpoint.z), 5, 0, Math.PI * 2);
-      ctx.strokeStyle = "#5df6ff";
+      ctx.strokeStyle = "#f2a33c";
       ctx.lineWidth = 2;
       ctx.stroke();
     }
 
-    ctx.fillStyle = "#ff4f8b";
+    ctx.fillStyle = "#e5484d";
     for (const enemy of enemies) {
       if (!enemy.alive) continue;
       ctx.beginPath();
@@ -130,8 +130,8 @@ export class Hud {
     ctx.save();
     ctx.translate(playerX, playerY);
     ctx.rotate(-yaw);
-    ctx.fillStyle = "#ffc857";
-    ctx.shadowColor = "#ffc857";
+    ctx.fillStyle = "#f5c76a";
+    ctx.shadowColor = "#f5c76a";
     ctx.shadowBlur = 8;
     ctx.beginPath();
     ctx.moveTo(0, -7);

@@ -14,10 +14,15 @@ const WALK_TOP_SPEED = 96;
 const SPRINT_TOP_SPEED = 216;
 const ABSOLUTE_TOP_SPEED = 265;
 
+/** Vertical offset that plants the feet on the sidewalk/road surface. */
+const BODY_OFFSET_Y = -0.74;
+
 export class Player {
   readonly root: TransformNode;
   readonly velocity = Vector3.Zero();
   readonly radius = 1.15;
+  /** Body meshes registered as shadow casters by the game. */
+  readonly meshes: Mesh[] = [];
 
   health = 100;
   charge = 50;
@@ -33,80 +38,244 @@ export class Player {
   private secondsSinceDamage = 99;
   private readonly trail: Mesh[] = [];
   private readonly trailPoints: Vector3[] = [];
-  private readonly torso: Mesh;
-  private readonly leftArm: Mesh;
-  private readonly rightArm: Mesh;
-  private readonly leftLeg: Mesh;
-  private readonly rightLeg: Mesh;
+
+  private readonly body: TransformNode;
+  private readonly upper: TransformNode;
+  private readonly head: TransformNode;
+  private readonly shoulderL: TransformNode;
+  private readonly shoulderR: TransformNode;
+  private readonly elbowL: TransformNode;
+  private readonly elbowR: TransformNode;
+  private readonly hipL: TransformNode;
+  private readonly hipR: TransformNode;
+  private readonly kneeL: TransformNode;
+  private readonly kneeR: TransformNode;
   private stride = 0;
+  private lifetime = 0;
 
   constructor(scene: Scene, spawn: Vector3) {
     this.root = new TransformNode("speedster", scene);
     this.root.position.copyFrom(spawn);
 
-    const suit = new StandardMaterial("speedster-suit", scene);
-    suit.diffuseColor = Color3.FromHexString("#4b2377");
-    suit.emissiveColor = Color3.FromHexString("#1b0832");
-    suit.specularColor = new Color3(0.55, 0.35, 0.8);
+    // Athletic courier suit: worn crimson over charcoal, muted trim. No neon.
+    const suit = new StandardMaterial("suit-crimson", scene);
+    suit.diffuseColor = Color3.FromHexString("#7e222c");
+    suit.specularColor = new Color3(0.28, 0.24, 0.24);
+    suit.specularPower = 48;
 
-    const accent = new StandardMaterial("speedster-accent", scene);
-    accent.diffuseColor = Color3.FromHexString("#f5c95a");
-    accent.emissiveColor = Color3.FromHexString("#9a5d13");
+    const suitDark = new StandardMaterial("suit-charcoal", scene);
+    suitDark.diffuseColor = Color3.FromHexString("#2a2d31");
+    suitDark.specularColor = new Color3(0.12, 0.12, 0.13);
+    suitDark.specularPower = 32;
 
-    const skin = new StandardMaterial("speedster-mask", scene);
-    skin.diffuseColor = Color3.FromHexString("#92526e");
-    skin.emissiveColor = Color3.FromHexString("#24101b");
+    const trim = new StandardMaterial("suit-trim", scene);
+    trim.diffuseColor = Color3.FromHexString("#b78f3e");
+    trim.specularColor = new Color3(0.45, 0.4, 0.28);
+    trim.specularPower = 64;
 
-    this.torso = MeshBuilder.CreateCapsule(
-      "hero-torso",
-      { height: 2.15, radius: 0.62, tessellation: 12 },
+    const skin = new StandardMaterial("hero-skin", scene);
+    skin.diffuseColor = Color3.FromHexString("#b9866a");
+    skin.specularColor = new Color3(0.1, 0.08, 0.07);
+
+    const visorGlass = new StandardMaterial("visor-glass", scene);
+    visorGlass.diffuseColor = Color3.FromHexString("#11161b");
+    visorGlass.specularColor = new Color3(0.85, 0.87, 0.9);
+    visorGlass.specularPower = 128;
+
+    this.body = new TransformNode("hero-body", scene);
+    this.body.parent = this.root;
+    this.body.position.y = BODY_OFFSET_Y;
+
+    const add = (mesh: Mesh, material: StandardMaterial, parent: TransformNode): Mesh => {
+      mesh.material = material;
+      mesh.parent = parent;
+      this.meshes.push(mesh);
+      return mesh;
+    };
+
+    // Pelvis stays with the legs; everything above the waist hangs off an
+    // upper-body pivot so the torso can lean into the sprint.
+    const pelvis = MeshBuilder.CreateCapsule(
+      "hero-pelvis",
+      { height: 0.66, radius: 0.34, tessellation: 10 },
       scene,
     );
-    this.torso.position.y = 2.05;
-    this.torso.scaling.z = 0.72;
-    this.torso.material = suit;
-    this.torso.parent = this.root;
+    pelvis.position.y = 2.14;
+    pelvis.scaling.set(1.0, 1, 0.72);
+    add(pelvis, suitDark, this.body);
 
-    const chest = MeshBuilder.CreatePolyhedron("hero-chest-mark", { type: 1, size: 0.34 }, scene);
-    chest.position.set(0, 2.22, 0.57);
-    chest.rotation.z = Math.PI * 0.25;
-    chest.scaling.y = 1.5;
-    chest.material = accent;
-    chest.parent = this.root;
+    this.upper = new TransformNode("hero-upper", scene);
+    this.upper.parent = this.body;
+    this.upper.position.y = 2.38;
 
-    const head = MeshBuilder.CreateSphere("hero-head", { diameter: 1.18, segments: 12 }, scene);
-    head.position.y = 3.55;
-    head.scaling.z = 0.92;
-    head.material = skin;
-    head.parent = this.root;
+    const torso = MeshBuilder.CreateCapsule(
+      "hero-torso",
+      { height: 1.56, radius: 0.4, tessellation: 12 },
+      scene,
+    );
+    torso.position.y = 0.58;
+    torso.scaling.set(1.08, 1, 0.7);
+    add(torso, suit, this.upper);
+
+    const belt = MeshBuilder.CreateCylinder(
+      "hero-belt",
+      { height: 0.12, diameter: 0.84, tessellation: 14 },
+      scene,
+    );
+    belt.position.y = -0.06;
+    belt.scaling.z = 0.8;
+    add(belt, trim, this.upper);
+
+    const emblem = MeshBuilder.CreateCylinder(
+      "hero-emblem",
+      { height: 0.05, diameter: 0.34, tessellation: 16 },
+      scene,
+    );
+    emblem.position.set(0, 0.82, 0.4);
+    emblem.rotation.x = Math.PI * 0.5;
+    add(emblem, trim, this.upper);
+
+    const neck = MeshBuilder.CreateCylinder(
+      "hero-neck",
+      { height: 0.26, diameter: 0.26, tessellation: 10 },
+      scene,
+    );
+    neck.position.y = 1.24;
+    add(neck, skin, this.upper);
+
+    this.head = new TransformNode("hero-head-pivot", scene);
+    this.head.parent = this.upper;
+    this.head.position.y = 1.36;
+
+    const cowl = MeshBuilder.CreateSphere("hero-cowl", { diameter: 0.6, segments: 12 }, scene);
+    cowl.position.y = 0.14;
+    cowl.scaling.set(0.92, 1.08, 0.96);
+    add(cowl, suit, this.head);
+
+    const jaw = MeshBuilder.CreateSphere("hero-jaw", { diameter: 0.42, segments: 10 }, scene);
+    jaw.position.set(0, -0.02, 0.13);
+    jaw.scaling.set(0.86, 0.66, 0.86);
+    add(jaw, skin, this.head);
 
     const visor = MeshBuilder.CreateBox(
       "hero-visor",
-      { width: 0.88, height: 0.16, depth: 0.09 },
+      { width: 0.46, height: 0.13, depth: 0.1 },
       scene,
     );
-    visor.position.set(0, 3.62, 0.55);
-    visor.material = accent;
-    visor.parent = this.root;
+    visor.position.set(0, 0.17, 0.28);
+    add(visor, visorGlass, this.head);
 
-    this.leftArm = limb(scene, "hero-left-arm", suit, -0.72, 2.05, 0);
-    this.rightArm = limb(scene, "hero-right-arm", suit, 0.72, 2.05, 0);
-    this.leftLeg = limb(scene, "hero-left-leg", suit, -0.31, 0.75, 0, 1.55);
-    this.rightLeg = limb(scene, "hero-right-leg", suit, 0.31, 0.75, 0, 1.55);
-    for (const part of [this.leftArm, this.rightArm, this.leftLeg, this.rightLeg]) {
-      part.parent = this.root;
-    }
+    // Arms: shoulder pivot -> upper arm -> elbow pivot -> forearm + hand.
+    const buildArm = (side: -1 | 1): { shoulder: TransformNode; elbow: TransformNode } => {
+      const label = side < 0 ? "l" : "r";
+      const shoulder = new TransformNode(`hero-shoulder-${label}`, scene);
+      shoulder.parent = this.upper;
+      shoulder.position.set(side * 0.62, 0.94, 0);
 
-    const trailMaterial = new StandardMaterial("momentum-trail", scene);
-    trailMaterial.diffuseColor = Color3.FromHexString("#5cecff");
-    trailMaterial.emissiveColor = Color3.FromHexString("#42dfff");
-    trailMaterial.alpha = 0.42;
+      const deltoid = MeshBuilder.CreateSphere(
+        `hero-deltoid-${label}`,
+        { diameter: 0.36, segments: 8 },
+        scene,
+      );
+      deltoid.position.y = 0.02;
+      add(deltoid, suit, shoulder);
+
+      const upperArm = MeshBuilder.CreateCapsule(
+        `hero-upper-arm-${label}`,
+        { height: 0.74, radius: 0.135, tessellation: 8 },
+        scene,
+      );
+      upperArm.position.y = -0.36;
+      add(upperArm, suit, shoulder);
+
+      const elbow = new TransformNode(`hero-elbow-${label}`, scene);
+      elbow.parent = shoulder;
+      elbow.position.y = -0.74;
+
+      const forearm = MeshBuilder.CreateCapsule(
+        `hero-forearm-${label}`,
+        { height: 0.68, radius: 0.115, tessellation: 8 },
+        scene,
+      );
+      forearm.position.y = -0.32;
+      add(forearm, suitDark, elbow);
+
+      const hand = MeshBuilder.CreateSphere(
+        `hero-hand-${label}`,
+        { diameter: 0.19, segments: 8 },
+        scene,
+      );
+      hand.position.y = -0.68;
+      hand.scaling.set(0.85, 1.1, 0.85);
+      add(hand, suitDark, elbow);
+
+      return { shoulder, elbow };
+    };
+
+    const armL = buildArm(-1);
+    const armR = buildArm(1);
+    this.shoulderL = armL.shoulder;
+    this.elbowL = armL.elbow;
+    this.shoulderR = armR.shoulder;
+    this.elbowR = armR.elbow;
+
+    // Legs: hip pivot -> thigh -> knee pivot -> shin + boot.
+    const buildLeg = (side: -1 | 1): { hip: TransformNode; knee: TransformNode } => {
+      const label = side < 0 ? "l" : "r";
+      const hip = new TransformNode(`hero-hip-${label}`, scene);
+      hip.parent = this.body;
+      hip.position.set(side * 0.26, 2.05, 0);
+
+      const thigh = MeshBuilder.CreateCapsule(
+        `hero-thigh-${label}`,
+        { height: 0.98, radius: 0.19, tessellation: 8 },
+        scene,
+      );
+      thigh.position.y = -0.48;
+      add(thigh, suit, hip);
+
+      const knee = new TransformNode(`hero-knee-${label}`, scene);
+      knee.parent = hip;
+      knee.position.y = -0.98;
+
+      const shin = MeshBuilder.CreateCapsule(
+        `hero-shin-${label}`,
+        { height: 0.92, radius: 0.145, tessellation: 8 },
+        scene,
+      );
+      shin.position.y = -0.44;
+      add(shin, suitDark, knee);
+
+      const boot = MeshBuilder.CreateBox(
+        `hero-boot-${label}`,
+        { width: 0.26, height: 0.16, depth: 0.56 },
+        scene,
+      );
+      boot.position.set(0, -0.92, 0.12);
+      add(boot, suitDark, knee);
+
+      return { hip, knee };
+    };
+
+    const legL = buildLeg(-1);
+    const legR = buildLeg(1);
+    this.hipL = legL.hip;
+    this.kneeL = legL.knee;
+    this.hipR = legR.hip;
+    this.kneeR = legR.knee;
+
+    // Faint slipstream instead of a neon light ribbon: pale, translucent
+    // streaks that read as displaced air at speed.
+    const trailMaterial = new StandardMaterial("slipstream", scene);
+    trailMaterial.diffuseColor = Color3.FromHexString("#dfe9ef");
+    trailMaterial.emissiveColor = Color3.FromHexString("#c8d4da");
+    trailMaterial.alpha = 0.16;
     trailMaterial.disableLighting = true;
 
     for (let i = 0; i < 16; i += 1) {
       const streak = MeshBuilder.CreateBox(
         `trail-${i}`,
-        { width: 0.12 + i * 0.025, height: 0.045, depth: 1.2 + i * 0.12 },
+        { width: 0.07 + i * 0.02, height: 0.035, depth: 1.3 + i * 0.14 },
         scene,
       );
       streak.material = trailMaterial;
@@ -270,20 +439,49 @@ export class Player {
     }
   }
 
+  /**
+   * Procedural run cycle: counter-swinging arms with bent elbows, knee
+   * flexion during leg recovery, forward lean, cadence-locked bob and a
+   * touch of torso roll. Amplitudes scale with pace so idling looks calm.
+   */
   private animate(dt: number): void {
-    const pace = Math.min(1, this.speed / 55);
-    this.stride += dt * (4 + this.speed * 0.17);
-    const swing = Math.sin(this.stride) * 0.75 * pace;
-    this.leftArm.rotation.x = swing;
-    this.rightArm.rotation.x = -swing;
-    this.leftLeg.rotation.x = -swing;
-    this.rightLeg.rotation.x = swing;
-    this.torso.rotation.x = 0.03 + this.speedRatio * 0.32;
-    this.root.scaling.y = 1 - this.speedRatio * 0.035;
+    this.lifetime += dt;
+    const speed = this.speed;
+    const pace = Math.min(1, speed / 55);
+    const cadence = Math.min(27, 3.4 + speed * 0.155);
+    this.stride += dt * cadence * pace;
+    const p = this.stride;
+
+    const swingL = Math.sin(p);
+    const swingR = Math.sin(p + Math.PI);
+    const breathe = Math.sin(this.lifetime * 2.1) * 0.02 * (1 - pace);
+
+    const lean = this.speedRatio * 0.52 + pace * 0.1;
+    this.body.rotation.x = lean * 0.4;
+    this.body.rotation.z = swingL * 0.035 * pace;
+    this.body.position.y = BODY_OFFSET_Y + Math.sin(p * 2) * 0.055 * pace;
+
+    this.upper.rotation.x = lean * 0.55 + breathe;
+    this.upper.rotation.y = swingL * 0.08 * pace;
+    this.head.rotation.x = -lean * 0.7;
+
+    const legAmp = 0.32 + pace * 0.78;
+    this.hipL.rotation.x = -swingL * legAmp;
+    this.hipR.rotation.x = -swingR * legAmp;
+    this.kneeL.rotation.x = 0.14 + Math.max(0, Math.sin(p - 1.9)) * (0.4 + pace * 1.25);
+    this.kneeR.rotation.x = 0.14 + Math.max(0, Math.sin(p + Math.PI - 1.9)) * (0.4 + pace * 1.25);
+
+    const armAmp = 0.22 + pace * 0.62;
+    this.shoulderL.rotation.x = -swingR * armAmp;
+    this.shoulderR.rotation.x = -swingL * armAmp;
+    this.shoulderL.rotation.z = 0.1 + pace * 0.05;
+    this.shoulderR.rotation.z = -0.1 - pace * 0.05;
+    this.elbowL.rotation.x = -(0.22 + pace * 1.2 + Math.max(0, -swingR) * 0.3);
+    this.elbowR.rotation.x = -(0.22 + pace * 1.2 + Math.max(0, -swingL) * 0.3);
   }
 
   private updateTrail(dt: number): void {
-    const visible = this.speed > 35;
+    const visible = this.speed > 45;
     const direction = this.speed > 1 ? this.velocity.normalizeToNew() : Vector3.Forward();
     const yaw = Math.atan2(direction.x, direction.z);
 
@@ -301,24 +499,9 @@ export class Player {
       Vector3.LerpToRef(point, target, 1 - Math.exp(-18 * dt), point);
       mesh.position.copyFrom(point);
       mesh.rotation.y = yaw;
-      mesh.visibility = Math.max(0.04, (1 - i / this.trail.length) * this.speedRatio * 0.7);
+      mesh.visibility = Math.max(0.03, (1 - i / this.trail.length) * this.speedRatio * 0.45);
     }
   }
-}
-
-function limb(
-  scene: Scene,
-  name: string,
-  limbMaterial: StandardMaterial,
-  x: number,
-  y: number,
-  z: number,
-  height = 1.45,
-): Mesh {
-  const part = MeshBuilder.CreateCapsule(name, { height, radius: 0.2, tessellation: 8 }, scene);
-  part.position.set(x, y, z);
-  part.material = limbMaterial;
-  return part;
 }
 
 function approach(value: number, target: number, amount: number): number {
