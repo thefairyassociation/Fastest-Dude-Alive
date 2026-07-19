@@ -44,17 +44,24 @@ Click the game to capture the mouse.
 Vite 8 requires Node.js 20.19+ or 22.12+.
 
 ```bash
-npm install
+npm ci
 npm run dev
 ```
 
 Production checks:
 
 ```bash
+npm run audit
 npm run typecheck
 npm run build
 npm run preview
 ```
+
+### Dependency safety
+
+Dependencies are pinned by `package-lock.json`, and CI installs that exact dependency tree with `npm ci --ignore-scripts`. CI also audits the complete dependency graph and fails when npm reports a high- or critical-severity advisory.
+
+When intentionally upgrading a dependency, run `npm install`, review both `package.json` and `package-lock.json`, and commit them together. Avoid hand-editing the lockfile.
 
 ## Technology decisions
 
