@@ -52,7 +52,6 @@ export class SpeedGame {
 
     const { engine, renderer } = await createBestEngine(this.canvas);
     this.scene = new Scene(engine);
-    this.scene.performancePriority = ScenePerformancePriority.Intermediate;
 
     if (loadingStatus) loadingStatus.textContent = "Waking Havok Physics V2…";
     try {
@@ -328,10 +327,6 @@ export class SpeedGame {
     this.effects.push({ mesh: bolt, age: 0, duration: 0.18, grow: 0 });
   }
 }
-
-const ScenePerformancePriority = {
-  Intermediate: 1,
-} as const;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
