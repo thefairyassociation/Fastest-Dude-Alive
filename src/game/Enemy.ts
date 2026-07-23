@@ -10,14 +10,16 @@ import {
 
 export class Enemy {
   readonly root: TransformNode;
+  /** Hull-only CSM proxy — rotors/nav lights stay out of the shadow map. */
+  readonly shadowCaster: Mesh;
   health = 4;
   alive = true;
   respawnTimer = 0;
   attackCooldown = 1 + Math.random();
   readonly velocity = Vector3.Zero();
 
-  private readonly core: Mesh;
-  private readonly rings: Mesh[] = [];
+  private readonly hull: Mesh;
+  private readonly rotors: Mesh[] = [];
   private age = Math.random() * 10;
 
   constructor(
@@ -28,44 +30,99 @@ export class Enemy {
     this.root = new TransformNode(`pursuit-drone-${id}`, scene);
     this.root.position.copyFrom(spawn);
 
-    const shell = new StandardMaterial(`drone-shell-${id}`, scene);
-    shell.diffuseColor = Color3.FromHexString("#23263d");
-    shell.emissiveColor = Color3.FromHexString("#111326");
-    shell.specularColor = new Color3(0.7, 0.4, 0.9);
+    const gunmetal = new StandardMaterial(`drone-gunmetal-${id}`, scene);
+    gunmetal.diffuseColor = Color3.FromHexString("#4c5157");
+    gunmetal.specularColor = new Color3(0.4, 0.42, 0.45);
+    gunmetal.specularPower = 48;
 
-    const energy = new StandardMaterial(`drone-energy-${id}`, scene);
-    energy.diffuseColor = Color3.FromHexString("#ff4f8b");
-    energy.emissiveColor = Color3.FromHexString("#ff1f6d");
-    energy.disableLighting = true;
+    const dark = new StandardMaterial(`drone-dark-${id}`, scene);
+    dark.diffuseColor = Color3.FromHexString("#22262a");
+    dark.specularColor = new Color3(0.2, 0.2, 0.22);
 
-    this.core = MeshBuilder.CreatePolyhedron(
-      `drone-core-${id}`,
-      { type: 1, size: 1.45 },
+    const rotorBlur = new StandardMaterial(`drone-rotor-${id}`, scene);
+    rotorBlur.diffuseColor = Color3.FromHexString("#2d3033");
+    rotorBlur.specularColor = Color3.Black();
+    rotorBlur.alpha = 0.34;
+    rotorBlur.backFaceCulling = false;
+
+    const navRed = new StandardMaterial(`drone-nav-red-${id}`, scene);
+    navRed.emissiveColor = Color3.FromHexString("#ff3b30");
+    navRed.disableLighting = true;
+
+    const navGreen = new StandardMaterial(`drone-nav-green-${id}`, scene);
+    navGreen.emissiveColor = Color3.FromHexString("#30d158");
+    navGreen.disableLighting = true;
+
+    const add = (mesh: Mesh, material: StandardMaterial): Mesh => {
+      mesh.material = material;
+      mesh.parent = this.root;
+      return mesh;
+    };
+
+    this.hull = MeshBuilder.CreateSphere(`drone-hull-${id}`, { diameter: 1.9, segments: 12 }, scene);
+    this.hull.scaling.set(1, 0.5, 1.15);
+    add(this.hull, gunmetal);
+    this.shadowCaster = this.hull;
+
+    const belly = MeshBuilder.CreateCylinder(
+      `drone-belly-${id}`,
+      { height: 0.5, diameterTop: 0.85, diameterBottom: 0.55, tessellation: 10 },
       scene,
     );
-    this.core.material = shell;
-    this.core.parent = this.root;
+    belly.position.y = -0.5;
+    add(belly, dark);
 
-    for (let i = 0; i < 2; i += 1) {
-      const ring = MeshBuilder.CreateTorus(
-        `drone-ring-${id}-${i}`,
-        { diameter: 3.2 + i * 0.65, thickness: 0.12, tessellation: 24 },
+    const lens = MeshBuilder.CreateSphere(`drone-lens-${id}`, { diameter: 0.34, segments: 8 }, scene);
+    lens.position.set(0, -0.18, 0.92);
+    add(lens, dark);
+
+    // Four rotor booms with translucent spinning discs.
+    const armOffsets: Array<[number, number]> = [
+      [0.92, 0.92],
+      [-0.92, 0.92],
+      [0.92, -0.92],
+      [-0.92, -0.92],
+    ];
+    for (let i = 0; i < armOffsets.length; i += 1) {
+      const offset = armOffsets[i];
+      if (!offset) continue;
+      const [ax, az] = offset;
+
+      const arm = MeshBuilder.CreateBox(
+        `drone-arm-${id}-${i}`,
+        { width: 0.16, height: 0.09, depth: 1.34 },
         scene,
       );
-      ring.rotation.x = i === 0 ? Math.PI * 0.5 : 0;
-      ring.material = energy;
-      ring.parent = this.root;
-      this.rings.push(ring);
-    }
+      arm.position.set(ax * 0.5, 0.08, az * 0.5);
+      arm.rotation.y = Math.atan2(ax, az);
+      add(arm, gunmetal);
 
-    const eye = MeshBuilder.CreateSphere(
-      `drone-eye-${id}`,
-      { diameter: 0.42, segments: 8 },
-      scene,
-    );
-    eye.position.z = 1.25;
-    eye.material = energy;
-    eye.parent = this.root;
+      const hub = MeshBuilder.CreateCylinder(
+        `drone-hub-${id}-${i}`,
+        { height: 0.2, diameter: 0.24, tessellation: 8 },
+        scene,
+      );
+      hub.position.set(ax, 0.18, az);
+      add(hub, dark);
+
+      const rotor = MeshBuilder.CreateCylinder(
+        `drone-rotor-${id}-${i}`,
+        { height: 0.03, diameter: 1.18, tessellation: 18 },
+        scene,
+      );
+      rotor.position.set(ax, 0.3, az);
+      add(rotor, rotorBlur);
+      this.rotors.push(rotor);
+
+      // Aviation nav lights: red portside, green starboard.
+      const light = MeshBuilder.CreateSphere(
+        `drone-nav-${id}-${i}`,
+        { diameter: 0.1, segments: 6 },
+        scene,
+      );
+      light.position.set(ax * 1.16, 0.1, az * 1.16);
+      add(light, ax < 0 ? navRed : navGreen);
+    }
   }
 
   get position(): Vector3 {
@@ -99,15 +156,20 @@ export class Enemy {
 
     this.root.position.addInPlace(this.velocity.scale(dt));
     this.root.position.y = this.spawn.y + Math.sin(this.age * 2.4 + this.id) * 0.7;
-    if (this.velocity.lengthSquared() > 0.1) {
+    const speed = this.velocity.length();
+    if (speed * speed > 0.1) {
       this.root.rotation.y = Math.atan2(this.velocity.x, this.velocity.z);
     }
 
-    this.core.rotation.y += dt * 1.7;
-    this.rings.forEach((ring, index) => {
-      ring.rotation.z += dt * (index === 0 ? 2.8 : -2.2);
-      ring.scaling.setAll(1 + Math.sin(this.age * 5 + index) * 0.035);
-    });
+    // Quadcopters pitch into their direction of travel.
+    this.root.rotation.x = Math.min(0.32, speed * 0.011);
+    this.root.rotation.z = Math.sin(this.age * 1.7 + this.id) * 0.03;
+
+    for (let i = 0; i < this.rotors.length; i += 1) {
+      const rotor = this.rotors[i];
+      if (!rotor) continue;
+      rotor.rotation.y += dt * (i % 2 === 0 ? 46 : -46);
+    }
 
     if (distance < 7.5 && this.attackCooldown <= 0) {
       this.attackCooldown = 1.35;
@@ -120,7 +182,7 @@ export class Enemy {
     if (!this.alive) return false;
     this.health -= damage;
     this.velocity.addInPlace(impulse);
-    this.core.scaling.setAll(1.25);
+    this.hull.scaling.set(1.2, 0.6, 1.35);
 
     if (this.health <= 0) {
       this.alive = false;
@@ -130,7 +192,7 @@ export class Enemy {
     }
 
     window.setTimeout(() => {
-      if (this.alive) this.core.scaling.setAll(1);
+      if (this.alive) this.hull.scaling.set(1, 0.5, 1.15);
     }, 80);
     return false;
   }

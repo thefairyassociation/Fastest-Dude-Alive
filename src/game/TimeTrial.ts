@@ -29,9 +29,10 @@ export class TimeTrial {
     private readonly route: Vector3[],
   ) {
     const material = new StandardMaterial("trial-marker", scene);
-    material.diffuseColor = Color3.FromHexString("#53f6ff");
-    material.emissiveColor = Color3.FromHexString("#35e6ff");
+    material.diffuseColor = Color3.FromHexString("#f2a33c");
+    material.emissiveColor = Color3.FromHexString("#e08b2d");
     material.disableLighting = true;
+    material.alpha = 0.85;
 
     this.marker = MeshBuilder.CreateTorus(
       "trial-checkpoint",
@@ -103,7 +104,7 @@ export class TimeTrial {
 
     return {
       title: `Meridian Loop · ${this.index + 1}/${this.route.length}`,
-      detail: `${formatTime(this.elapsed)} · Follow the cyan gate`,
+      detail: `${formatTime(this.elapsed)} · Follow the amber gate`,
     };
   }
 

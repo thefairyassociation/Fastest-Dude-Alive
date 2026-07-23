@@ -1,9 +1,11 @@
 import HavokPhysics from "@babylonjs/havok";
 import {
   Color3,
+  Color4,
+  DefaultRenderingPipeline,
   FreeCamera,
-  GlowLayer,
   HavokPlugin,
+  ImageProcessingConfiguration,
   LinesMesh,
   Mesh,
   MeshBuilder,
@@ -72,6 +74,11 @@ export class SpeedGame {
     this.hud = new Hud(this.city.extent);
     this.hud.setRenderer(renderer);
 
+    this.city.addShadowCaster(this.player.shadowCaster);
+    for (const enemy of this.enemies) {
+      this.city.addShadowCaster(enemy.shadowCaster);
+    }
+
     this.camera = new FreeCamera(
       "speed-camera",
       this.player.root.position.add(new Vector3(0, 7, -16)),
@@ -82,11 +89,29 @@ export class SpeedGame {
     this.camera.fov = 0.92;
     this.scene.activeCamera = this.camera;
 
-    const glow = new GlowLayer("city-glow", this.scene, {
-      blurKernelSize: 32,
-    });
-    glow.intensity = 0.7;
+    // Filmic post stack: ACES tone mapping, gentle bloom for sun/glass
+    // highlights, FXAA and a light vignette. This replaces the old neon
+    // glow layer and does most of the "photographic" heavy lifting.
+    const pipeline = new DefaultRenderingPipeline("photographic", true, this.scene, [this.camera]);
+    pipeline.fxaaEnabled = true;
+    pipeline.bloomEnabled = true;
+    pipeline.bloomThreshold = 0.85;
+    pipeline.bloomWeight = 0.18;
+    pipeline.bloomKernel = 48;
+    pipeline.bloomScale = 0.5;
+    const processing = this.scene.imageProcessingConfiguration;
+    processing.toneMappingEnabled = true;
+    processing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
+    processing.exposure = 1.15;
+    processing.contrast = 1.06;
+    processing.vignetteEnabled = true;
+    processing.vignetteWeight = 1.4;
+    processing.vignetteColor = new Color4(0.03, 0.03, 0.04, 0);
 
+    this.finishBoot(engine);
+  }
+
+  private finishBoot(engine: { resize(): void; getDeltaTime(): number; runRenderLoop(fn: () => void): void }): void {
     this.scene.executeWhenReady(() => {
       document.getElementById("loading")?.classList.add("is-hidden");
       document.getElementById("hud")?.classList.remove("is-hidden");
@@ -147,7 +172,7 @@ export class SpeedGame {
           const impulse = this.forward().scale(75);
           const defeated = enemy.hit(2.5, impulse);
           this.player.registerHit(2);
-          this.spawnPulse(enemy.position, "#ffc857", 5);
+          this.spawnPulse(enemy.position, "#ffc38a", 5);
           this.hud.flashAbility("ability-dash");
           if (defeated) this.hud.toast("Drone outrun");
         }
@@ -161,10 +186,10 @@ export class SpeedGame {
         const damage = 1.25 + this.player.speedRatio * 1.5;
         const defeated = target.hit(damage, this.forward().scale(34));
         this.player.registerHit();
-        this.spawnPulse(target.position, "#fff1ac", 3);
+        this.spawnPulse(target.position, "#ffe0b0", 3);
         if (defeated) this.hud.toast("Velocity takedown");
       } else {
-        this.spawnPulse(this.player.root.position, "#9c6bff", 1.5);
+        this.spawnPulse(this.player.root.position, "#d6dee3", 1.5);
       }
     }
 
@@ -196,7 +221,7 @@ export class SpeedGame {
         this.player.registerHit(1.5);
         if (defeated) this.hud.toast("Pulse takedown");
       }
-      this.spawnPulse(this.player.root.position, "#63f3ff", 18);
+      this.spawnPulse(this.player.root.position, "#e6edf2", 18);
       this.hud.flashAbility("ability-pulse");
       if (hitCount === 0) this.hud.toast("Kinetic pulse");
     }
@@ -207,7 +232,7 @@ export class SpeedGame {
     for (const enemy of this.enemies) {
       const damage = enemy.update(enemyDt, this.player.root.position);
       if (damage > 0 && this.player.damage(damage, enemy.position)) {
-        this.spawnPulse(this.player.root.position, "#ff416c", 4);
+        this.spawnPulse(this.player.root.position, "#ff5a4e", 4);
         this.hud.toast("Dampener strike");
       }
     }
@@ -323,7 +348,7 @@ export class SpeedGame {
       { points: [from, Vector3.Lerp(from, middle, 0.55), middle, Vector3.Lerp(middle, to, 0.55), to] },
       this.scene,
     );
-    bolt.color = Color3.FromHexString("#65f4ff");
+    bolt.color = Color3.FromHexString("#aacfff");
     this.effects.push({ mesh: bolt, age: 0, duration: 0.18, grow: 0 });
   }
 }
