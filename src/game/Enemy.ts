@@ -10,8 +10,8 @@ import {
 
 export class Enemy {
   readonly root: TransformNode;
-  /** Meshes registered as shadow casters by the game. */
-  readonly meshes: Mesh[] = [];
+  /** Hull-only CSM proxy — rotors/nav lights stay out of the shadow map. */
+  readonly shadowCaster: Mesh;
   health = 4;
   alive = true;
   respawnTimer = 0;
@@ -56,13 +56,13 @@ export class Enemy {
     const add = (mesh: Mesh, material: StandardMaterial): Mesh => {
       mesh.material = material;
       mesh.parent = this.root;
-      this.meshes.push(mesh);
       return mesh;
     };
 
     this.hull = MeshBuilder.CreateSphere(`drone-hull-${id}`, { diameter: 1.9, segments: 12 }, scene);
     this.hull.scaling.set(1, 0.5, 1.15);
     add(this.hull, gunmetal);
+    this.shadowCaster = this.hull;
 
     const belly = MeshBuilder.CreateCylinder(
       `drone-belly-${id}`,

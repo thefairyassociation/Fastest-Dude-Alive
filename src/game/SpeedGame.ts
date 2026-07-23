@@ -74,9 +74,9 @@ export class SpeedGame {
     this.hud = new Hud(this.city.extent);
     this.hud.setRenderer(renderer);
 
-    for (const mesh of this.player.meshes) this.city.addShadowCaster(mesh);
+    this.city.addShadowCaster(this.player.shadowCaster);
     for (const enemy of this.enemies) {
-      for (const mesh of enemy.meshes) this.city.addShadowCaster(mesh);
+      this.city.addShadowCaster(enemy.shadowCaster);
     }
 
     this.camera = new FreeCamera(
