@@ -325,27 +325,29 @@ export class City {
       }
     }
 
-    const staticMeshes: Mesh[] = [];
-    const push = (merged: Mesh | null): void => {
-      if (merged) staticMeshes.push(merged);
+    // Merge groups span the full 2.5 km grid, so registering them as CSM
+    // casters defeats cascade culling. Keep them as receivers only; the
+    // spire and actor shadow proxies provide local contact shadows.
+    const receivers: Mesh[] = [];
+    const pushReceiver = (merged: Mesh | null): void => {
+      if (merged) receivers.push(merged);
     };
-    push(mergeGroup("sidewalks", sidewalks, sidewalkMaterial));
-    push(mergeGroup("park-grass", grassParts, grassMaterial));
-    push(mergeGroup("tree-trunks", trunkParts, trunkMaterial));
-    push(mergeGroup("tree-canopies", leafParts, leafMaterial));
-    push(mergeGroup("street-steel", steelParts, steelMaterial));
-    push(mergeGroup("car-glass", carGlassParts, carGlass));
-    push(mergeGroup("car-underbodies", carDarkParts, carDark));
+    pushReceiver(mergeGroup("sidewalks", sidewalks, sidewalkMaterial));
+    pushReceiver(mergeGroup("park-grass", grassParts, grassMaterial));
+    pushReceiver(mergeGroup("tree-trunks", trunkParts, trunkMaterial));
+    pushReceiver(mergeGroup("tree-canopies", leafParts, leafMaterial));
+    pushReceiver(mergeGroup("street-steel", steelParts, steelMaterial));
+    pushReceiver(mergeGroup("car-glass", carGlassParts, carGlass));
+    pushReceiver(mergeGroup("car-underbodies", carDarkParts, carDark));
     carPaintParts.forEach((parts, index) => {
-      push(mergeGroup(`cars-${index}`, parts, carPaints[index] ?? carPaints[0]!));
+      pushReceiver(mergeGroup(`cars-${index}`, parts, carPaints[index] ?? carPaints[0]!));
     });
     buildingGroups.forEach((group, index) => {
-      push(mergeGroup(`building-group-${index}`, group, buildingMaterials[index] ?? buildingMaterials[0]!));
+      pushReceiver(mergeGroup(`building-group-${index}`, group, buildingMaterials[index] ?? buildingMaterials[0]!));
     });
 
-    for (const mesh of staticMeshes) {
+    for (const mesh of receivers) {
       mesh.receiveShadows = true;
-      this.shadows?.addShadowCaster(mesh);
     }
   }
 
@@ -513,6 +515,15 @@ export class City {
       pole.bakeCurrentTransformIntoVertices();
       steelParts.push(pole);
 
+      // Compact pole footprint — arms/heads are visual-only.
+      const poleHit = 0.45;
+      this.colliders.push({
+        minX: x - poleHit,
+        maxX: x + poleHit,
+        minZ: z - poleHit,
+        maxZ: z + poleHit,
+      });
+
       const arm = MeshBuilder.CreateBox(
         `lamp-arm-${gx}-${gz}-${dx}-${dz}`,
         { width: 0.14, height: 0.14, depth: 2.4 },
@@ -605,6 +616,15 @@ export class City {
         under.position.set(x, GROUND_Y + 0.25, z);
         under.bakeCurrentTransformIntoVertices();
         darkParts.push(under);
+
+        const halfW = (alongX ? length : width) * 0.5;
+        const halfD = (alongX ? width : length) * 0.5;
+        this.colliders.push({
+          minX: x - halfW,
+          maxX: x + halfW,
+          minZ: z - halfD,
+          maxZ: z + halfD,
+        });
       }
     }
   }

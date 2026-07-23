@@ -21,8 +21,8 @@ export class Player {
   readonly root: TransformNode;
   readonly velocity = Vector3.Zero();
   readonly radius = 1.15;
-  /** Body meshes registered as shadow casters by the game. */
-  readonly meshes: Mesh[] = [];
+  /** Single hull proxy for CSM — limbs/detail stay out of the shadow map. */
+  readonly shadowCaster: Mesh;
 
   health = 100;
   charge = 50;
@@ -92,9 +92,20 @@ export class Player {
     const add = (mesh: Mesh, material: StandardMaterial, parent: TransformNode): Mesh => {
       mesh.material = material;
       mesh.parent = parent;
-      this.meshes.push(mesh);
       return mesh;
     };
+
+    // Invisible upright hull for cascaded shadows (visibility 0 still casts).
+    this.shadowCaster = MeshBuilder.CreateCapsule(
+      "hero-shadow",
+      { height: 3.1, radius: 0.52, tessellation: 6 },
+      scene,
+    );
+    this.shadowCaster.parent = this.root;
+    this.shadowCaster.position.y = 1.55;
+    this.shadowCaster.isPickable = false;
+    this.shadowCaster.visibility = 0;
+    this.shadowCaster.receiveShadows = false;
 
     // Pelvis stays with the legs; everything above the waist hangs off an
     // upper-body pivot so the torso can lean into the sprint.
