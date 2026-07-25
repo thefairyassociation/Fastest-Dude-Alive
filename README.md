@@ -18,8 +18,10 @@ This project is inspired by the broad fantasy of comic-book super speed, but it 
 - An optional checkpoint time trial with a saved personal best.
 - Responsive HUD, renderer badge, speedometer, objectives, ability prompts, and a live minimap.
 - Keyboard/mouse input with a pointer-lock camera.
+- A grounded late-afternoon presentation: procedurally textured facades (glass, concrete, brick, panel), asphalt with lane markings and crosswalks, sidewalk slabs, streetlights, parked cars, a landmark broadcast spire, a gradient sky with sun and clouds, cascaded sun shadows, and an ACES tone-mapped filmic post pipeline.
+- An articulated hero model (shoulders, elbows, hips, knees) with a procedural run cycle, and quad-rotor pursuit drones with spinning rotors and nav lights.
 
-Everything is generated from Babylon primitives. There are no external art or audio assets yet, which keeps the prototype lightweight and legally clean.
+Everything is generated from Babylon primitives and canvas-painted procedural textures. There are no external art or audio assets yet, which keeps the prototype lightweight and legally clean.
 
 ## Controls
 
