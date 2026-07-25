@@ -1,45 +1,76 @@
 # Fastest Dude Alive
 
-> A browser-first, original speedster sandbox built with TypeScript and Babylon.js.
+> A browser-first, original speedster game built with TypeScript and Babylon.js.
 
-**Status:** playable first-iteration prototype. Run across a large procedural city, chase a time trial, fight pursuit drones, chain momentum abilities, and briefly enter Focus Time.
+**Status:** two playable modes over one city. **Free Roam** is an open 3.7 km sandbox with routes, rescues, collectibles and opt-in rogue duels. **Story Mode** is a twelve-chapter, three-act campaign with an authored cast, dialogue and set pieces.
 
-This project is inspired by the broad fantasy of comic-book super speed, but it does not use characters, names, logos, storylines, models, sounds, or other assets from DC Comics. Future contributors should keep the game and its identity original.
+This project is inspired by the broad fantasy of comic-book super speed. It does **not** use characters, names, logos, storylines, models, sounds or other assets from DC Comics or any other rights holder. The campaign is deliberately built in the shape of a serialised superhero drama — the lab accident, the team in the basement, the detective who raised him, the reporter who names him, the mentor with a secret — but every name, organisation and power in it is original to this project. Keep it that way.
 
-## Playable in this iteration
+## The two modes
 
-- A roughly 2.5 km-wide procedural city with long roads, varied buildings, parks, landmarks, and enough runway to sustain speed.
-- Third-person free roaming from a jog to about 780 km/h.
-- A 120 Hz fixed-step player simulation, bounded frame catch-up, speed-sensitive steering, and substep collision resolution.
-- WebGPU when supported, with automatic WebGL 2 fallback.
-- Momentum combat: high-speed body checks, Phase Dash, targeted Arc Bolt, radial Kinetic Pulse, close-range speed strikes, combo rewards, and overdrive.
-- Pursuit drones with chase, orbit, telegraph, attack, knockback, defeat, and respawn behavior.
-- Focus Time: enemies slow while the player retains most of their speed; momentum drains while active.
-- An optional checkpoint time trial with a saved personal best.
-- Responsive HUD, renderer badge, speedometer, objectives, ability prompts, and a live minimap.
-- Keyboard/mouse input with a pointer-lock camera.
-- A grounded late-afternoon presentation: procedurally textured facades (glass, concrete, brick, panel), asphalt with lane markings and crosswalks, sidewalk slabs, streetlights, parked cars, a landmark broadcast spire, a gradient sky with sun and clouds, cascaded sun shadows, and an ACES tone-mapped filmic post pipeline.
-- An articulated hero model (shoulders, elbows, hips, knees) with a procedural run cycle, and quad-rotor pursuit drones with spinning rotors and nav lights.
+### Free Roam
 
-Everything is generated from Babylon primitives and canvas-painted procedural textures. There are no external art or audio assets yet, which keeps the prototype lightweight and legally clean.
+The city, open, with no story gates.
+
+- 25 × 25 blocks of Meridian City (~3.7 km across) split into six named districts, a river with three bridges, and nine hand-placed landmarks.
+- Four checkpoint routes with saved personal bests: the **Meridian Loop** (pure top speed), the **Riverline Sprint** (speed-gated water running), **The Crest Ladder** (rooftop-only, wall running required) and the **Kestrel Courier** chain.
+- Two rescue runs — reach every stranded person before the clock runs out; each save buys you time back.
+- 64 **resonance motes** scattered across rooftops, bridge cables and back alleys, persisted in your profile. Roughly two thirds are only reachable by wall running.
+- Five opt-in **rogue duels** parked at landmarks. Combat is a minigame you choose to start, not something that chases you across the map.
+- Walk up to any activity and press <kbd>T</kbd>.
+
+### Story Mode
+
+Twelve chapters in three acts, each with its own atmosphere, cast and objectives.
+
+| Act | Chapters |
+| --- | --- |
+| **I — First Light** | The Longest Second · Eleven Months · A Man Who Runs Hot · The Streak |
+| **II — Rogues** | Dead Seconds · Pressure Systems · The Cold Equation · What Wren Knows |
+| **III — Vantage** | Negative Resonance · Twenty-Two Years · The Man in the Chair · The Fastest Dude Alive |
+
+The premise: Halcyon Labs' resonance ring was built to bend local time. The night it failed, the front crossed the city in eleven seconds and found a forensic technician on a precinct roof. Eleven months later he wakes up in the building that killed him, and the people who kept him alive would like a word. Meanwhile the city starts losing whole minutes at a time, and someone else is moving inside them.
+
+Chapters unlock in order, are replayable from the chapter-select screen, and the final chapter ends on a choice.
+
+Story beats are authored as data in `src/game/story/script.ts`; the runner in `Campaign.ts` is mechanical. Adding a new objective type means one case in the runner and one entry in the script union.
+
+## Movement
+
+The whole game is the handling model.
+
+| Move | How |
+| --- | --- |
+| Run · sprint | WASD, hold Shift toward ~215 m/s (775 km/h) |
+| Jump | Space — jump distance scales with speed |
+| Phase dash | Space again in mid-air; costs momentum, grants brief invulnerability |
+| Slide | Ctrl or C above 20 m/s; low friction, carries you through corners |
+| **Vertical run** | Run head-on into a facade above ~48 m/s and your momentum becomes altitude. Crest the parapet and you mantle onto the roof. |
+| **Wall run** | Hit a wall at an angle instead and you stick to it, gravity cut to a fifth. Space kicks off. |
+| **Water running** | The river holds you above ~34 m/s. Drop under and it remembers you weigh something. |
+| Focus time | Hold F — everyone else slows, you don't; drains momentum |
+
+Turning gets heavier the faster you go, which is the entire handling model in one sentence.
 
 ## Controls
 
 | Input | Action |
 | --- | --- |
 | WASD | Run and steer |
-| Shift | Sprint toward top speed |
+| Shift | Sprint |
+| Space | Jump · in the air, phase dash · on a wall, wall jump |
+| Ctrl / C | Slide |
 | Mouse | Look |
 | Left click | Speed strike |
-| Space | Phase Dash |
-| E | Arc Bolt |
-| Q | Kinetic Pulse |
-| F (hold) | Focus Time |
-| T | Start/restart the time trial |
+| E | Arc bolt |
+| Q | Kinetic pulse |
+| F (hold) | Focus time |
+| T | Start the nearest activity |
 | R | Recover at the nearest road |
-| Esc | Release the mouse |
+| M | City map |
+| Esc | Pause |
 
-Click the game to capture the mouse.
+Gamepad is supported: sticks to move and look, A jump, B slide, X strike, Y bolt, bumpers for focus and pulse.
 
 ## Run it
 
@@ -72,114 +103,90 @@ When intentionally upgrading a dependency, run `npm install`, review both `packa
 | Language | TypeScript | Useful contracts for gameplay systems without slowing iteration |
 | Engine | Babylon.js 9 | Mature browser 3D, WebGPU/WebGL support, glTF pipeline |
 | Renderer | WebGPU first, WebGL 2 fallback | Best available path without excluding older hardware |
-| Tooling | Vite 8.1 | Fast development and production bundling |
-| Physics | Babylon Physics V2 + Havok, plus a custom kinematic speed controller | Havok suits props and ordinary actors; a speedster cannot rely on one discrete rigid-body step without tunneling |
+| Materials | PBR with canvas-painted albedo + normal maps | Energy-conserving specular and real roughness variation, with zero binary assets |
+| Lighting | Directional sun + hemispheric ambient + cascaded shadows, plus a painted sky cube for IBL | Image-based lighting without shipping an HDR |
+| Physics | A custom kinematic speed controller; Havok Physics V2 initialised for future props | A speedster cannot survive one discrete rigid-body step per frame without tunnelling |
+| Broadphase | Uniform 48 m spatial hash | The old linear collider scan was O(n) per substep at 120 Hz |
 | UI | Semantic HTML + CSS | Accessible, responsive, cheap to render |
-| Audio | Babylon audio / Web Audio | Spatial sound and speed-layer mixing without a second engine |
-| Saves | IndexedDB | Planned for campaign state, settings, collectibles, and replays; the prototype currently saves the trial best with browser storage |
+| Saves | Versioned profile in localStorage, IndexedDB-shaped | Campaign state, settings, route bests and collectibles |
 | Modeling | Blender to glTF/GLB | Open workflow with excellent Babylon support |
-| Source | Git + GitHub; Git LFS for large binaries only | Text remains reviewable; future models, textures, and audio belong in LFS |
+| Source | Git + GitHub; Git LFS for large binaries only | Text stays reviewable; future models, textures and audio belong in LFS |
 | Desktop later | Tauri 2 wrapper | Reuses the web game and is lighter than bundling a full browser stack |
+
+Everything you see is generated at boot from Babylon primitives and canvas-painted procedural textures. There are no external art or audio assets, which keeps the build lightweight and legally clean.
 
 ### High-speed architecture
 
-Very fast characters expose collision tunneling, unstable camera motion, coordinate precision problems, and excessive draw distance. The intended architecture is hybrid:
+Very fast characters expose collision tunnelling, unstable camera motion, coordinate precision problems and excessive draw distance. The architecture is hybrid:
 
-1. Simulate player intent at a fixed 120 Hz.
-2. Sweep/substep a kinematic capsule through nearby static collision volumes.
-3. Use Havok for ordinary dynamic props, debris, traffic, enemies, and interactive set pieces.
-4. Stream city cells around the player and shift the world origin before coordinates become imprecise.
-5. Decouple camera/effects smoothing from simulation velocity.
-6. Scale effects by perceptual speed instead of spawning thousands of particles.
+1. Simulate player intent at a fixed 120 Hz with bounded frame catch-up.
+2. Sweep a kinematic cylinder through a spatial hash, subdividing so a single frame's motion cannot tunnel a building.
+3. Resolve axes independently, so sliding along a facade at 700 km/h stays smooth.
+4. Merge the city into per-chunk meshes so frustum culling works, and distance-cull clutter separately from structure.
+5. Decouple camera and effect smoothing from simulation velocity.
+6. Scale effects by perceptual speed from fixed pools instead of spawning thousands of emitters.
 
-The prototype implements the first, second, and fifth items. City streaming and floating-origin rebasing are roadmap work.
+City-cell streaming and floating-origin rebasing remain roadmap work.
 
 ## Project layout
 
 ```text
 src/
   game/
-    City.ts          procedural city and collision queries
-    Enemy.ts         pursuit-drone behavior
-    Hud.ts           DOM HUD and minimap
-    Input.ts         keyboard, mouse, and pointer lock
-    Player.ts        speed controller, resources, and visuals
-    SpeedGame.ts     loop, combat, effects, and orchestration
-    TimeTrial.ts     checkpoint activity and persistence
-    engine.ts        WebGPU/WebGL engine selection
+    core/        Rng, Input (actions + gamepad), Save (versioned profile), engine selection
+    world/       City, Collision (spatial hash), Landmarks, Materials, Sky (atmospheres), Textures
+    player/      Player (traversal state machine), HeroModel (rig + procedural animation)
+    npc/         Rogue (encounter opponents), Bystander (rescue targets)
+    fx/          Effects (pooled rings, arcs, afterimages, particles), Markers (waypoints)
+    activities/  Activity contract, RouteRun, RescueRun, RogueDuel, Collectibles, routes
+    story/       script (the authored campaign), Campaign (chapter runner), cast
+    ui/          Hud, Menu, Dialogue
+    SpeedGame.ts orchestration: loop, camera, combat, mode switching
   main.ts
   styles.css
 ```
 
-Gameplay should stay asset-agnostic. Replace primitives through factories instead of coupling mechanics to a specific Blender hierarchy.
+Gameplay stays asset-agnostic. Replace primitives through factories rather than coupling mechanics to a specific Blender hierarchy.
 
 ## Roadmap
 
-### 1. Speed foundation (current)
+### Done
 
-- [x] Typed browser build and fixed-step game loop
-- [x] Large procedural city
-- [x] High-speed movement and collision
-- [x] Chase camera, speed FOV, trails, HUD, and minimap
-- [x] Combat sandbox and time trial
-- [x] WebGPU/WebGL renderer selection
-- [x] Havok initialization
-- [ ] Automated performance budgets, gamepad/rebinding, accessibility, reduced motion
+- [x] Typed browser build, fixed-step loop, WebGPU/WebGL selection
+- [x] 3.7 km procedural city with districts, a river and authored landmarks
+- [x] Spatial-hash broadphase, chunked merging, distance LOD
+- [x] Full 3D traversal: gravity, jump, air dash, slide, wall run, vertical run, water running
+- [x] PBR materials with procedural normal maps, drivable atmospheres, pooled speed FX
+- [x] Free-roam activity suite and opt-in rogue encounters
+- [x] Twelve-chapter campaign with dialogue, objectives and a final choice
+- [x] Menu, chapter select, settings (quality, sensitivity, reduced motion, units), versioned saves
 
-### 2. Make speed extraordinary
+### Next
 
-- Surface-aware running, wall-running, water-running, vaults, rail grinding, rooftop traversal, and safe auto-step.
-- City-cell streaming, hierarchical LOD, pooled effects, occlusion strategy, and floating origin.
-- A real animation state machine for acceleration, braking, cornering, impacts, and procedural lean.
-- An original visual/fantasy identity for the source of the character's speed.
-- Traffic and civilians at ordinary scale while the player moves at extreme scale.
+- Traffic and civilians at city scale, not just around encounters.
+- City-cell streaming and floating-origin rebasing for a larger map.
+- A real animation state machine to replace the procedural poser: acceleration, braking, cornering, impacts.
+- Focus time that slows selected simulation layers rather than a single multiplier, with target marking and route planning.
+- Audio: footsteps, wind, cloth, impacts, electricity, ambience, dialogue and adaptive music.
+- Bosses that change traversal rules instead of gaining health.
 - Replay ghosts and asynchronous leaderboards.
-
-### 3. Speedster combat
-
-- Directional melee where route choice matters more than button mashing.
-- Mark several targets during Focus Time, then execute the route at full speed.
-- Rescue encounters, disarming, interception, vortex control, environmental throws, and non-lethal takedowns.
-- Enemies built around prediction, area denial, decoys, dampening fields, and vertical pressure.
-- Bosses that change traversal rules instead of merely gaining health.
-- Havok-driven props/debris with strict pooling and simulation-distance limits.
-
-### 4. Focus Time
-
-The prototype has a small playable version. The full system should slow selected simulation layers instead of the render loop, preserve input/camera responsiveness, support target marking and path planning, alter layered audio, expose readable resource costs, and offer a reduced-motion alternative.
-
-### 5. Story campaign (separate from free roam)
-
-Do not rush story into the sandbox. Build it as a separate campaign mode that shares the city and mechanics while free roam remains independently available.
-
-Working premise: a courier bonded to an experimental transit field becomes the only person able to move during citywide "dead seconds." Each episode investigates who is stealing fractions of time from the population. The campaign should have authored missions, conversations, rescues, set pieces, consequences, and a beginning/middle/end.
-
-Before implementation, write a narrative bible covering the original hero, supporting cast, antagonists, districts, mission pillars, tone, and rules of the time-field fiction.
-
-### 6. Content and production
-
-- Blender-authored modular city kit, original hero, NPCs, vehicles, props, and animations exported as glTF/GLB.
-- Audio layers for footsteps, wind, cloth, impacts, electricity, ambience, dialogue, and adaptive music.
-- IndexedDB profiles with versioned migrations, slots, settings, campaign state, collectibles, and replay data.
-- PWA/offline support, install prompt, touch experiments, deployment, and telemetry that respects privacy.
-- Tests for movement math, save migrations, encounters, and deterministic replay slices.
-- Optional Tauri 2 desktop packaging only after the browser version is stable. Keep platform services behind adapters so web remains first-class.
+- Automated performance budgets, key rebinding UI, and further accessibility work.
 
 ## Performance budgets
 
 - Target 60 fps at 1080p on a midrange desktop; graceful 30 fps mode on integrated graphics.
-- No per-frame garbage in core movement/combat loops.
+- No per-frame garbage in core movement, combat or effect loops — pools use index scans, not `Array.find`.
 - Cap fixed simulation catch-up to avoid a spiral of death.
-- Track hard budgets for meshes, materials, textures, physics bodies, audio voices, and particles.
-- Avoid permanent full-city physics bodies; only nearby/active cells should participate.
+- Track hard budgets for meshes, materials, textures, physics bodies, audio voices and particles.
+- Avoid permanent full-city physics bodies; only nearby cells should participate.
 - Profile while moving at top speed, not while standing still.
 
 ## Asset and repository policy
 
-- Keep code, config, small SVGs, and docs in normal Git.
-- Add Git LFS before large `.blend`, `.glb`, texture, animation-cache, video, or lossless-audio files.
-- Keep source assets and documented export presets. Never commit copyrighted DC/Flash assets.
-- Record asset licenses in `docs/ASSETS.md`.
+- Keep code, config, small SVGs and docs in normal Git.
+- Add Git LFS before large `.blend`, `.glb`, texture, animation-cache, video or lossless-audio files.
+- Keep source assets and documented export presets. **Never commit copyrighted DC/Flash assets.**
+- Record asset licences in `docs/ASSETS.md`.
 - Keep generated build output out of Git.
 
 Suggested LFS patterns when assets arrive:
@@ -193,15 +200,15 @@ Suggested LFS patterns when assets arrive:
 
 ## Notes for future coding agents
 
-- Preserve free roam independently from the eventual campaign.
-- Keep the hero, setting, powers, UI, and terminology original.
+- Free roam and the campaign must stay independently playable. Neither may gate the other.
+- Keep the hero, setting, powers, UI and terminology original. See the note at the top of `src/game/story/cast.ts`.
 - Test movement at top speed and under simulated slow frames.
-- Do not solve tunneling by making every city mesh a high-frequency dynamic body.
-- Prefer spatial queries, pooling, instancing/merging, LOD, and streamed chunks.
-- Keep WebGL fallback working when adding WebGPU-only effects.
-- Treat save schemas as versioned public data.
-- Add features in vertical slices: mechanic, feedback, failure state, performance check, and documentation.
+- Do not solve tunnelling by making every city mesh a high-frequency dynamic body.
+- Prefer spatial queries, pooling, instancing/merging, LOD and chunked culling.
+- Keep the WebGL fallback working when adding WebGPU-only effects.
+- Treat save schemas as versioned public data; route changes through `migrate` in `core/Save.ts`.
+- Add features in vertical slices: mechanic, feedback, failure state, performance check, documentation.
 
-## License
+## Licence
 
-Code is MIT licensed. No rights are granted to third-party characters, brands, or properties.
+Code is MIT licensed. No rights are granted to third-party characters, brands or properties.
