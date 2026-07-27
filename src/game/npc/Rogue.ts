@@ -127,6 +127,9 @@ export function rogueById(id: string): RogueDefinition {
 
 type Phase = "approach" | "telegraph" | "strike" | "recover" | "stagger" | "down";
 
+/** How close to the marked landing point a ranged shot still hurts. */
+const BLAST_RADIUS = 11;
+
 export interface RogueOutcome {
   /** Damage to apply to the player this step. */
   damage: number;
@@ -168,6 +171,8 @@ export class Rogue {
     vulnerable: true,
   };
   private readonly landing = new Vector3();
+  /** Set when a ranged wind-up resolves; cleared once the blast is applied. */
+  private blastPending = false;
   private stride = 0;
   private lifetime = Math.random() * 6;
 
@@ -341,6 +346,7 @@ export class Rogue {
           this.phaseTimer = this.definition.archetype === "brawler" ? 0.45 : 0.2;
           if (this.definition.archetype === "artillery" || this.definition.archetype === "zoner") {
             this.landing.copyFrom(playerPosition);
+            this.blastPending = true;
             out.projectile = this.landing;
             if (this.definition.archetype === "zoner") {
               this.fields.push({ position: playerPosition.clone(), radius: 16, life: 6 });
@@ -349,7 +355,7 @@ export class Rogue {
         }
         break;
       case "strike":
-        this.strike(dt, direction, distance, out);
+        this.strike(dt, direction, distance, playerPosition, out);
         break;
       case "recover":
         this.velocity.scaleInPlace(Math.exp(-4 * dt));
@@ -420,7 +426,13 @@ export class Rogue {
     }
   }
 
-  private strike(dt: number, direction: Vector3, distance: number, out: RogueOutcome): void {
+  private strike(
+    dt: number,
+    direction: Vector3,
+    distance: number,
+    playerPosition: Vector3,
+    out: RogueOutcome,
+  ): void {
     const def = this.definition;
     if (def.archetype === "brawler" || def.archetype === "speedster") {
       const lunge = def.archetype === "speedster" ? def.speed * 0.7 : def.speed * 2.2;
@@ -433,7 +445,15 @@ export class Rogue {
       }
     } else {
       this.velocity.scaleInPlace(Math.exp(-5 * dt));
-      if (distance < 10) out.damage = def.damage * 0.5;
+      // Ranged shots resolve once, at the point they were aimed at. Distance
+      // to the thrower is not the question — these archetypes deliberately
+      // hold 26-48 m away, so the old proximity check never fired at all.
+      if (this.blastPending) {
+        this.blastPending = false;
+        if (Vector3.DistanceSquared(playerPosition, this.landing) < BLAST_RADIUS * BLAST_RADIUS) {
+          out.damage = def.damage;
+        }
+      }
     }
 
     if (this.phaseTimer <= 0) {

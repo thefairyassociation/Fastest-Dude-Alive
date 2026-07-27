@@ -462,16 +462,28 @@ export class Player {
 
   private integrate(dt: number, city: City): void {
     const before = this.root.position.clone();
+    const previousY = this.root.position.y;
+    const falling = this.velocity.y < -6;
 
     // Vertical first: landing on a roof must not be eaten by a wall sweep.
     this.root.position.y += this.velocity.y * dt;
+
+    // Land before sweeping sideways, against a ceiling spanning the whole
+    // vertical step. At terminal velocity one step covers ~0.79 m, well past
+    // the step-height window, so sampling only the post-move Y drops any
+    // rooftop crossed in between and the runner falls straight through it.
+    const sweptCeiling = Math.max(previousY, this.root.position.y) + STEP_HEIGHT;
+    const swept = city.groundHeight(this.root.position.x, this.root.position.z, sweptCeiling);
+    if (this.root.position.y < swept) {
+      this.root.position.y = swept;
+      this.velocity.y = 0;
+    }
 
     const delta = this.scratch.set(this.velocity.x * dt, 0, this.velocity.z * dt);
     city.move(this.root.position, delta, this.radius, this.height, STEP_HEIGHT, this.move);
 
     const ground = this.move.groundY;
     if (this.root.position.y <= ground + 0.02) {
-      const falling = this.velocity.y < -6;
       this.root.position.y = ground;
       this.velocity.y = 0;
       if (this.state === "air" || this.state === "wall" || this.state === "vertical") {

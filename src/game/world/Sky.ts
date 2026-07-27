@@ -236,6 +236,12 @@ export class Sky {
     this.shadows.bias = 0.008;
     this.shadows.normalBias = 0.02;
     this.shadows.setDarkness(0.28);
+    // Casters are hidden hull proxies with visibility 0. Babylon treats
+    // visibility < 1 as needing alpha blending and drops those submeshes from
+    // the shadow map unless this is on, which is why the actors were casting
+    // nothing at all. Soft transparent shadows stay off, so they cast solid.
+    this.shadows.transparencyShadow = true;
+    this.shadows.enableSoftTransparentShadow = false;
     this.shadows.usePercentageCloserFiltering = true;
     this.shadows.filteringQuality =
       quality === "high" ? ShadowGenerator.QUALITY_HIGH : ShadowGenerator.QUALITY_MEDIUM;

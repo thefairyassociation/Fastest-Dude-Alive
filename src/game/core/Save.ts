@@ -10,6 +10,25 @@
 const KEY = "fastest-dude-alive:profile";
 const VERSION = 2;
 
+/**
+ * Bounds for anything read back from storage. A profile is user-editable, so
+ * treat it as untrusted input: a hand-written `unlocked: 9999` or a
+ * million-entry `collected` array should cost nothing at parse time.
+ */
+const MAX_CHAPTERS = 12;
+const MAX_IDS = 512;
+
+function idList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.length > 64) continue;
+    seen.add(entry);
+    if (seen.size >= MAX_IDS) break;
+  }
+  return [...seen];
+}
+
 export type Quality = "low" | "medium" | "high";
 
 export interface Settings {
@@ -108,7 +127,10 @@ export class Save {
     if (!this.profile.campaign.completed.includes(id)) {
       this.profile.campaign.completed.push(id);
     }
-    this.profile.campaign.unlocked = Math.max(this.profile.campaign.unlocked, index + 2);
+    this.profile.campaign.unlocked = Math.min(
+      MAX_CHAPTERS,
+      Math.max(this.profile.campaign.unlocked, index + 2),
+    );
     this.profile.campaign.current = null;
     this.scheduleFlush();
   }
@@ -185,26 +207,24 @@ function migrate(raw: unknown): Profile {
   if (typeof source.campaign === "object" && source.campaign !== null) {
     const c = source.campaign as Partial<CampaignSave>;
     if (typeof c.unlocked === "number" && Number.isFinite(c.unlocked)) {
-      profile.campaign.unlocked = Math.max(1, Math.floor(c.unlocked));
+      profile.campaign.unlocked = Math.min(MAX_CHAPTERS, Math.max(1, Math.floor(c.unlocked)));
     }
-    if (Array.isArray(c.completed)) {
-      profile.campaign.completed = c.completed.filter((id): id is string => typeof id === "string");
-    }
+    profile.campaign.completed = idList(c.completed);
     profile.campaign.current = typeof c.current === "string" ? c.current : null;
   }
 
   if (typeof source.routeBests === "object" && source.routeBests !== null) {
+    let kept = 0;
     for (const [id, value] of Object.entries(source.routeBests)) {
-      if (typeof value === "number" && Number.isFinite(value)) profile.routeBests[id] = value;
+      if (kept >= MAX_IDS) break;
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) continue;
+      profile.routeBests[id] = value;
+      kept += 1;
     }
   }
 
-  if (Array.isArray(source.collected)) {
-    profile.collected = source.collected.filter((id): id is string => typeof id === "string");
-  }
-  if (Array.isArray(source.roguesBeaten)) {
-    profile.roguesBeaten = source.roguesBeaten.filter((id): id is string => typeof id === "string");
-  }
+  profile.collected = idList(source.collected);
+  profile.roguesBeaten = idList(source.roguesBeaten);
   if (typeof source.totalDistanceMeters === "number" && Number.isFinite(source.totalDistanceMeters)) {
     profile.totalDistanceMeters = source.totalDistanceMeters;
   }

@@ -83,6 +83,8 @@ export class SpeedGame {
   private peakSpeed = 0;
   private paused = true;
   private nearestActivity: Activity | null = null;
+  /** What the results card is reporting; the primary button branches on it. */
+  private lastResult: "complete" | "failed" = "complete";
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.input = new Input(canvas);
@@ -132,7 +134,7 @@ export class SpeedGame {
 
     this.hud = new Hud(this.city);
     this.hud.setRenderer(renderer);
-    this.dialogue = new Dialogue();
+    this.dialogue = new Dialogue(this.input);
     this.menu = new Menu(this.save, {
       onFreeRoam: () => this.startFreeRoam(),
       onChapter: (chapter) => this.startChapter(chapter),
@@ -414,6 +416,12 @@ export class SpeedGame {
     this.menu.hideResults();
 
     if (this.mode === "story" && this.chapter) {
+      // The button says "Retry chapter" on a failure and "Next chapter" on a
+      // win. One handler serves both, so it has to know which it is.
+      if (this.lastResult === "failed") {
+        this.startChapter(this.chapter);
+        return;
+      }
       const next = CHAPTERS[CHAPTERS.indexOf(this.chapter) + 1];
       if (next && next.number <= this.save.data.campaign.unlocked) {
         this.startChapter(next);
@@ -430,9 +438,17 @@ export class SpeedGame {
   /* ------------------------------------------------------------------ */
 
   private fixedUpdate(dt: number): void {
+    // Sample pad edges once per step, alongside the keyboard's.
+    this.input.poll();
     const talking = this.dialogue.active;
 
     if (this.input.consume("map")) this.hud.toggleMap();
+    // Escape is handled by the window listener so it also works while paused;
+    // this is the gamepad Start path into the same place.
+    if (this.input.consume("pause")) {
+      this.pauseGame();
+      return;
+    }
 
     if (talking) {
       // The dialogue shares its advance key with jump, so the player must not
@@ -478,6 +494,7 @@ export class SpeedGame {
       this.campaign = null;
       this.paused = true;
       this.input.releasePointerLock();
+      this.lastResult = "complete";
       this.menu.showResults(
         `Chapter ${chapter.number} complete`,
         chapter.title,
@@ -491,6 +508,7 @@ export class SpeedGame {
       this.campaign = null;
       this.paused = true;
       this.input.releasePointerLock();
+      this.lastResult = "failed";
       this.menu.showResults(
         "Chapter failed",
         campaign.chapter.title,

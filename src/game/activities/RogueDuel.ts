@@ -24,7 +24,8 @@ export class RogueDuel implements Activity {
   private started = false;
   private elapsed = 0;
   private introShown = false;
-  private hitsTaken = 0;
+  /** Latched the first time health crosses the threshold, not per frame. */
+  private wasHurtBadly = false;
 
   constructor(
     rogueId: string,
@@ -48,7 +49,7 @@ export class RogueDuel implements Activity {
     world.spawnRogue(this.definition.id, spawn);
     this.started = true;
     this.elapsed = 0;
-    this.hitsTaken = 0;
+    this.wasHurtBadly = false;
     this.introShown = false;
   }
 
@@ -78,7 +79,7 @@ export class RogueDuel implements Activity {
       return "failed";
     }
 
-    if (world.player.health <= 25) this.hitsTaken += 1;
+    if (world.player.health <= 25) this.wasHurtBadly = true;
     if (world.player.health <= 0) return "failed";
     return "running";
   }
@@ -101,7 +102,7 @@ export class RogueDuel implements Activity {
   }
 
   successMessage(): string {
-    const clean = this.hitsTaken === 0 ? " without dropping below a quarter" : "";
+    const clean = this.wasHurtBadly ? "" : " without dropping below a quarter";
     return `${this.definition.codename} is down${clean}.`;
   }
 }

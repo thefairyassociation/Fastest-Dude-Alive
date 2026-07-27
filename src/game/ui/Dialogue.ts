@@ -1,3 +1,4 @@
+import type { Input } from "../core/Input";
 import type { DialogueView } from "../story/Campaign";
 import type { ChoiceOption, Line } from "../story/script";
 import { CAST } from "../story/cast";
@@ -23,6 +24,8 @@ export class Dialogue implements DialogueView {
   private options: [ChoiceOption, ChoiceOption] | null = null;
   private highlighted = 0;
   private resolved: string | null = null;
+
+  constructor(private readonly input: Input) {}
 
   get active(): boolean {
     return this.lines.length > 0 || this.options !== null;
@@ -67,6 +70,9 @@ export class Dialogue implements DialogueView {
       button.addEventListener("click", () => {
         this.highlighted = index;
         this.confirmChoice();
+        // The same click also registered a Mouse0 edge, and Mouse0 is bound
+        // to advance — without this the first outcome line is skipped.
+        this.input.discard("advance");
       });
       this.choiceBox.append(button);
     });

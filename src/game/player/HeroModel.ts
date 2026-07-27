@@ -86,7 +86,8 @@ export class HeroModel {
     this.resonance = pbr(scene, "hero-resonance", "#1a1416", 0.4, 0.1);
     this.resonance.emissiveColor = new Color3(0.35, 0.2, 0.06);
 
-    // Invisible upright hull for CSM (visibility 0 still casts).
+    // Invisible upright hull for CSM. visibility 0 only casts because the
+    // generator runs with transparencyShadow enabled — see Sky.ts.
     this.shadowCaster = MeshBuilder.CreateCapsule(
       "hero-shadow",
       { height: 1.8, radius: 0.3, tessellation: 6 },

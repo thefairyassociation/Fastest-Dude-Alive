@@ -55,6 +55,9 @@ const BLOCKED = new Set([
 export class Input {
   private readonly held = new Set<string>();
   private readonly pressed = new Set<string>();
+  /** Gamepad buttons currently down, and the edges not yet consumed. */
+  private readonly padHeld = new Set<number>();
+  private readonly padPressed = new Set<number>();
   private readonly bindings: Record<Action, string[]> = structuredClone(DEFAULT_BINDINGS);
   private lookX = 0;
   private lookY = 0;
@@ -126,6 +129,28 @@ export class Input {
     return document.pointerLockElement === this.canvas;
   }
 
+  /**
+   * Samples gamepad button transitions into the same edge set the keyboard
+   * uses. Call once per simulation step: `consume` clears edges, so a press
+   * survives until something actually claims it.
+   */
+  poll(): void {
+    const pad = this.gamepad();
+    if (!pad) {
+      this.padHeld.clear();
+      return;
+    }
+    for (let index = 0; index < pad.buttons.length; index += 1) {
+      const down = pad.buttons[index]?.pressed === true;
+      if (down) {
+        if (!this.padHeld.has(index)) this.padPressed.add(index);
+        this.padHeld.add(index);
+      } else {
+        this.padHeld.delete(index);
+      }
+    }
+  }
+
   down(action: Action): boolean {
     for (const code of this.bindings[action]) {
       if (this.held.has(code)) return true;
@@ -139,6 +164,8 @@ export class Input {
     for (const code of this.bindings[action]) {
       if (this.pressed.delete(code)) found = true;
     }
+    const button = GAMEPAD_BUTTONS[action];
+    if (button !== undefined && this.padPressed.delete(button)) found = true;
     return found;
   }
 
@@ -147,7 +174,19 @@ export class Input {
     for (const code of this.bindings[action]) {
       if (this.pressed.has(code)) return true;
     }
-    return false;
+    const button = GAMEPAD_BUTTONS[action];
+    return button !== undefined && this.padPressed.has(button);
+  }
+
+  /**
+   * Drops a press that has already been claimed by the DOM.
+   * Clicking a dialogue choice fires the button's handler *and* records a
+   * Mouse0 edge, which the same frame's advance would otherwise eat.
+   */
+  discard(action: Action): void {
+    for (const code of this.bindings[action]) this.pressed.delete(code);
+    const button = GAMEPAD_BUTTONS[action];
+    if (button !== undefined) this.padPressed.delete(button);
   }
 
   bind(action: Action, codes: string[]): void {
@@ -188,6 +227,8 @@ export class Input {
   releaseAll(): void {
     this.held.clear();
     this.pressed.clear();
+    this.padHeld.clear();
+    this.padPressed.clear();
     this.lookX = 0;
     this.lookY = 0;
   }

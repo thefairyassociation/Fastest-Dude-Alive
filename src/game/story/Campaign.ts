@@ -50,6 +50,8 @@ export class Campaign {
   private failed = false;
   private choiceId: string | null = null;
   private surviveRogueId: string | null = null;
+  /** Last sign of the movement axis, so held left/right moves the highlight once. */
+  private choiceAxis = 0;
 
   constructor(
     readonly chapter: Chapter,
@@ -82,8 +84,11 @@ export class Campaign {
 
     if (this.dialogue.active) {
       if (input.consume("advance")) this.dialogue.advance();
-      const movement = input.movement();
-      if (movement.x !== 0) this.dialogue.cycle(movement.x);
+      // Edge-triggered: `movement.x` is non-zero on every one of the 120
+      // steps a second while the key is held, which strobed the highlight.
+      const axis = Math.sign(input.movement().x);
+      if (axis !== 0 && axis !== this.choiceAxis) this.dialogue.cycle(axis);
+      this.choiceAxis = axis;
       if (!this.dialogue.active) {
         const chosen = this.dialogue.chosen;
         if (chosen !== null) this.choiceId = chosen;
@@ -274,17 +279,17 @@ export class Campaign {
     if (!activity) return "complete";
 
     // Story routes can carry their own hard time limit on top of the run.
-    if (this.inline.timer > 0) {
-      this.inline.timer -= dt;
-      if (this.inline.timer <= 0) return "failed";
-    }
+    // The activity resolves first: banking the final gate on the same step
+    // the clock expires should be a win, not a loss.
+    const expired = this.inline.timer > 0 && (this.inline.timer -= dt) <= 0;
 
     const result = activity.update(dt, this.world);
     if (result === "complete") {
       this.world.toast(activity.successMessage());
       return "complete";
     }
-    return result === "failed" ? "failed" : "running";
+    if (result === "failed") return "failed";
+    return expired ? "failed" : "running";
   }
 
   private updateInline(dt: number, beat: Objective): CampaignResult {
