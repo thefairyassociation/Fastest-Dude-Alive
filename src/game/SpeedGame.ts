@@ -196,6 +196,7 @@ export class SpeedGame {
   }): void {
     this.scene.executeWhenReady(() => {
       document.getElementById("loading")?.classList.add("is-hidden");
+      this.input.setEnabled(false);
       this.menu.show();
     });
 
@@ -203,6 +204,12 @@ export class SpeedGame {
 
     engine.runRenderLoop(() => {
       const frameDt = Math.min(0.05, engine.getDeltaTime() / 1000);
+
+      const gamepadPause = this.input.pollPause();
+      if (gamepadPause && this.mode !== "menu" && !this.menu.resultsVisible) {
+        if (this.paused) this.resume();
+        else this.pauseGame();
+      }
 
       if (!this.paused) {
         this.accumulator = Math.min(0.12, this.accumulator + frameDt);
@@ -335,6 +342,7 @@ export class SpeedGame {
     this.mode = "free";
     this.chapter = null;
     this.city.sky.setAtmosphere("golden", true);
+    this.input.releaseAll();
     this.player.teleport(this.city.start);
     this.player.health = 100;
     this.player.charge = 50;
@@ -351,6 +359,7 @@ export class SpeedGame {
     this.player.charge = 60;
     this.campaign = new Campaign(chapter, this.world, this.dialogue);
     this.campaign.start();
+    this.input.releaseAll();
     this.save.update((profile) => {
       profile.campaign.current = chapter.id;
     });
@@ -443,13 +452,6 @@ export class SpeedGame {
     const talking = this.dialogue.active;
 
     if (this.input.consume("map")) this.hud.toggleMap();
-    // Escape is handled by the window listener so it also works while paused;
-    // this is the gamepad Start path into the same place.
-    if (this.input.consume("pause")) {
-      this.pauseGame();
-      return;
-    }
-
     if (talking) {
       // The dialogue shares its advance key with jump, so the player must not
       // read input at all while a conversation is up — it would eat the press.
@@ -494,6 +496,7 @@ export class SpeedGame {
       this.campaign = null;
       this.paused = true;
       this.input.releasePointerLock();
+      this.input.setEnabled(false);
       this.lastResult = "complete";
       this.menu.showResults(
         `Chapter ${chapter.number} complete`,
@@ -508,6 +511,7 @@ export class SpeedGame {
       this.campaign = null;
       this.paused = true;
       this.input.releasePointerLock();
+      this.input.setEnabled(false);
       this.lastResult = "failed";
       this.menu.showResults(
         "Chapter failed",
@@ -606,11 +610,12 @@ export class SpeedGame {
       for (const rogue of this.rogues) {
         if (!rogue.alive) continue;
         if (Vector3.DistanceSquared(rogue.position, position) > 5 * 5) continue;
+        const accepted = rogue.vulnerable;
         const power = 1.5 + player.speedRatio * 2.5;
         const heading = player.velocity.normalizeToNew();
         if (rogue.hit(power, heading.x * 30, heading.z * 30)) this.onRogueDefeated(rogue);
         else this.effects.pulse(rogue.position, "warm", 6);
-        player.registerHit(2);
+        if (accepted) player.registerHit(2);
       }
     }
 
@@ -618,12 +623,13 @@ export class SpeedGame {
       player.useStrike();
       const target = this.findTarget(14, -0.3);
       if (target) {
+        const accepted = target.vulnerable;
         const damage = 1.4 + player.speedRatio * 1.8;
         const heading = this.headingVector();
         if (target.hit(damage, heading.x * 22, heading.z * 22)) this.onRogueDefeated(target);
         else this.effects.pulse(target.position, "warm", 4);
         this.effects.burst(target.position, 16, "warm");
-        player.registerHit();
+        if (accepted) player.registerHit();
       } else {
         this.effects.pulse(position, "pale", 2, 0.25);
       }
@@ -636,8 +642,9 @@ export class SpeedGame {
         const from = position.add(new Vector3(0, 1.2, 0));
         this.effects.bolt(from, target.position.add(new Vector3(0, 1, 0)));
         const away = target.position.subtract(position).normalize();
+        const accepted = target.vulnerable;
         if (target.hit(2.2, away.x * 14, away.z * 14)) this.onRogueDefeated(target);
-        player.registerHit(1.5);
+        if (accepted) player.registerHit(1.5);
         this.hud.flashAbility("ability-bolt");
       } else {
         this.hud.toast("No target in arc");
@@ -653,9 +660,12 @@ export class SpeedGame {
         const distance = away.length();
         if (distance > 34 || distance < 0.01) continue;
         const scale = 44 / distance;
+        const accepted = rogue.vulnerable;
         if (rogue.hit(2.4, away.x * scale, away.z * scale)) this.onRogueDefeated(rogue);
-        hits += 1;
-        player.registerHit(1.5);
+        if (accepted) {
+          hits += 1;
+          player.registerHit(1.5);
+        }
       }
       this.effects.pulse(position, "pale", 30, 0.5);
       this.hud.flashAbility("ability-pulse");
