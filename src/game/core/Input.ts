@@ -58,6 +58,8 @@ export class Input {
   /** Gamepad buttons currently down, and the edges not yet consumed. */
   private readonly padHeld = new Set<number>();
   private readonly padPressed = new Set<number>();
+  /** Tracks the gamepad Start button independently of gameplay input. */
+  private padPauseHeld = false;
   private readonly bindings: Record<Action, string[]> = structuredClone(DEFAULT_BINDINGS);
   private lookX = 0;
   private lookY = 0;
@@ -138,6 +140,7 @@ export class Input {
     const pad = this.gamepad();
     if (!pad) {
       this.padHeld.clear();
+      this.padPressed.clear();
       return;
     }
     for (let index = 0; index < pad.buttons.length; index += 1) {
@@ -149,6 +152,27 @@ export class Input {
         this.padHeld.delete(index);
       }
     }
+  }
+
+  /**
+   * Samples the gamepad Start button even while gameplay input is disabled.
+   * This lets Start resume a paused run without allowing other buttons to
+   * accumulate while a menu owns the screen.
+   */
+  pollPause(): boolean {
+    if (typeof navigator.getGamepads !== "function") {
+      this.padPauseHeld = false;
+      return false;
+    }
+    for (const pad of navigator.getGamepads()) {
+      if (!pad?.connected) continue;
+      const down = pad.buttons[9]?.pressed === true;
+      const pressed = down && !this.padPauseHeld;
+      this.padPauseHeld = down;
+      return pressed;
+    }
+    this.padPauseHeld = false;
+    return false;
   }
 
   down(action: Action): boolean {
