@@ -6,15 +6,21 @@
     <meta name="theme-color" content="#0e1012" />
     <meta
       name="description"
-      content="Fastest Dude Alive — an original browser-based super-speed sandbox."
+      content="Fastest Dude Alive — an original browser-based super-speed sandbox with a free-roam city and a full story campaign."
     />
     <title>Fastest Dude Alive</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230e1012'/%3E%3Cpath d='M18 4 L26 4 L18 14 L26 14 L9 28 L14 17 L6 17 Z' fill='%23e8a53c'/%3E%3C/svg%3E"
+    />
   </head>
   <body>
     <main id="game-shell">
       <canvas id="game-canvas" aria-label="Fastest Dude Alive game view"></canvas>
       <div class="speed-vignette" aria-hidden="true"></div>
+      <div class="focus-tint" aria-hidden="true"></div>
 
+      <!-- ---------------- Loading ---------------- -->
       <section id="loading" class="loading-screen" aria-live="polite">
         <div class="brand-bolt">FDA</div>
         <p class="eyebrow">A speedster systems prototype</p>
@@ -23,19 +29,143 @@
         <p id="loading-status">Building Meridian City…</p>
       </section>
 
+      <!-- ---------------- Main menu ---------------- -->
+      <section id="menu" class="menu is-hidden" aria-label="Main menu">
+        <div class="menu-inner">
+          <header class="menu-head">
+            <div class="brand-bolt small">FDA</div>
+            <div>
+              <p class="eyebrow">Meridian City</p>
+              <h1>Fastest Dude Alive</h1>
+            </div>
+          </header>
+
+          <div id="menu-root" class="menu-panel">
+            <div class="mode-grid">
+              <button class="mode-card" id="btn-free-roam" type="button">
+                <span class="mode-tag">Mode 01</span>
+                <strong>Free Roam</strong>
+                <p>
+                  Three and a half kilometres of Meridian, open. Run the routes, clear rescues,
+                  hunt resonance motes, or just find out how fast the river lets you go.
+                </p>
+                <span class="mode-go">Enter the city →</span>
+              </button>
+
+              <button class="mode-card" id="btn-story" type="button">
+                <span class="mode-tag">Mode 02</span>
+                <strong>Story Mode</strong>
+                <p>
+                  Twelve chapters, three acts. A forensic tech, a lab that owes the city an
+                  explanation, and a man in bone-white and gold who has been here far longer
+                  than anyone.
+                </p>
+                <span class="mode-go">Begin the campaign →</span>
+              </button>
+            </div>
+
+            <div class="menu-links">
+              <button class="link-button" id="btn-settings" type="button">Settings</button>
+              <button class="link-button" id="btn-controls" type="button">Controls</button>
+              <span class="menu-stat" id="menu-stat"></span>
+            </div>
+          </div>
+
+          <!-- Chapter select -->
+          <div id="menu-chapters" class="menu-panel is-hidden">
+            <div class="panel-head">
+              <h2>Story Mode</h2>
+              <button class="link-button" data-back="menu-root" type="button">← Back</button>
+            </div>
+            <div id="chapter-list" class="chapter-list"></div>
+          </div>
+
+          <!-- Settings -->
+          <div id="menu-settings" class="menu-panel is-hidden">
+            <div class="panel-head">
+              <h2>Settings</h2>
+              <button class="link-button" data-back="menu-root" type="button">← Back</button>
+            </div>
+            <div class="settings-grid">
+              <label class="setting">
+                <span>Graphics quality</span>
+                <select id="set-quality">
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+                <small>Applies on the next reload. Lower settings cut shadow resolution, clutter distance and particle counts.</small>
+              </label>
+
+              <label class="setting">
+                <span>Look sensitivity</span>
+                <input id="set-sensitivity" type="range" min="0.2" max="2.5" step="0.05" />
+                <small id="set-sensitivity-value">1.00×</small>
+              </label>
+
+              <label class="setting setting-row">
+                <input id="set-reduced-motion" type="checkbox" />
+                <span>Reduced motion — trims afterimages, speed lines and screen shake</span>
+              </label>
+
+              <label class="setting setting-row">
+                <input id="set-mph" type="checkbox" />
+                <span>Show speed in mph</span>
+              </label>
+
+              <button class="danger-button" id="btn-reset-profile" type="button">
+                Reset profile (times, motes, campaign progress)
+              </button>
+            </div>
+          </div>
+
+          <!-- Controls -->
+          <div id="menu-controls" class="menu-panel is-hidden">
+            <div class="panel-head">
+              <h2>Controls</h2>
+              <button class="link-button" data-back="menu-root" type="button">← Back</button>
+            </div>
+            <table class="controls-table">
+              <tbody>
+                <tr><th>WASD</th><td>Run and steer</td></tr>
+                <tr><th>Shift</th><td>Sprint toward top speed</td></tr>
+                <tr><th>Space</th><td>Jump · in the air, phase dash</td></tr>
+                <tr><th>Ctrl / C</th><td>Slide</td></tr>
+                <tr><th>Run at a wall</th><td>Head-on climbs it · at an angle, wall runs it</td></tr>
+                <tr><th>Space on a wall</th><td>Wall jump</td></tr>
+                <tr><th>Left click</th><td>Speed strike</td></tr>
+                <tr><th>E</th><td>Arc bolt</td></tr>
+                <tr><th>Q</th><td>Kinetic pulse</td></tr>
+                <tr><th>F (hold)</th><td>Focus time</td></tr>
+                <tr><th>T</th><td>Start the nearest activity</td></tr>
+                <tr><th>R</th><td>Recover at the nearest road</td></tr>
+                <tr><th>M</th><td>Toggle the city map</td></tr>
+                <tr><th>Esc</th><td>Pause</td></tr>
+              </tbody>
+            </table>
+            <p class="fine-print">A gamepad works too: sticks to move and look, A to jump, B to slide, X to strike, Y for bolt, bumpers for focus and pulse.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- HUD ---------------- -->
       <section id="hud" class="hud is-hidden" aria-label="Game status">
         <div class="wordmark">
-          <strong>Fastest Dude Alive</strong>
+          <strong id="mode-label">Free roam</strong>
           <span id="renderer-badge">Detecting GPU</span>
         </div>
 
         <div class="objective-pill">
           <strong id="objective-title">Free roam</strong>
-          <span id="objective-detail">Press T to launch the Meridian Loop.</span>
+          <span id="objective-detail">Press T at a marker to start an activity.</span>
+          <div class="objective-progress"><span id="objective-progress-fill"></span></div>
         </div>
+
+        <div id="district-banner" class="district-banner"><span id="district-name"></span></div>
 
         <div class="minimap-wrap">
           <canvas id="minimap" width="360" height="360" aria-label="Local minimap"></canvas>
+          <div class="minimap-legend"><span id="mote-count">0 / 64</span> motes</div>
         </div>
 
         <div class="cluster">
@@ -52,32 +182,90 @@
           </div>
           <div class="speed-readout">
             <strong id="speed-value">0</strong>
-            <span class="unit">km/h</span>
+            <span class="unit" id="speed-unit">km/h</span>
             <span id="speed-tier">Still</span>
           </div>
           <div class="speed-bar"><span id="speed-fill"></span></div>
+          <div id="traversal-state" class="traversal-state"></div>
         </div>
 
         <div class="abilities" aria-label="Abilities">
           <div id="ability-dash" class="ability"><kbd>Spc</kbd><span>Dash</span></div>
+          <div id="ability-slide" class="ability"><kbd>Ctrl</kbd><span>Slide</span></div>
           <div id="ability-bolt" class="ability"><kbd>E</kbd><span>Bolt</span></div>
           <div id="ability-pulse" class="ability"><kbd>Q</kbd><span>Pulse</span></div>
           <div id="ability-focus" class="ability"><kbd>F</kbd><span>Focus</span></div>
+        </div>
+
+        <div id="rogue-bar" class="rogue-bar is-hidden">
+          <div class="rogue-name"><strong id="rogue-codename">Rogue</strong><span id="rogue-real"></span></div>
+          <div class="rogue-meter"><span id="rogue-fill"></span></div>
+          <span id="rogue-tell" class="rogue-tell">Hit them on the recovery</span>
         </div>
 
         <div class="reticle" aria-hidden="true"></div>
         <div id="toast" class="toast" aria-live="polite"></div>
         <div id="focus-banner" class="focus-banner"><span>Focus time</span></div>
 
+        <div id="prompt" class="prompt is-hidden">
+          <kbd>T</kbd><strong id="prompt-title"></strong><span id="prompt-detail"></span>
+        </div>
+
         <div id="capture-hint" class="capture-hint">
           <strong>Click to enter the city</strong>
-          <span>WASD run · Shift sprint · Space dash · T time trial</span>
+          <span>WASD run · Shift sprint · Space jump · run at a wall to climb it</span>
+        </div>
+
+        <!-- Dialogue -->
+        <div id="dialogue" class="dialogue is-hidden">
+          <div class="dialogue-body">
+            <div class="dialogue-speaker">
+              <span id="dialogue-chip" class="speaker-chip">N</span>
+              <div>
+                <strong id="dialogue-name">Nolan</strong>
+                <small id="dialogue-role"></small>
+              </div>
+            </div>
+            <p id="dialogue-text"></p>
+            <div id="dialogue-choices" class="dialogue-choices is-hidden"></div>
+            <span id="dialogue-hint" class="dialogue-hint">Space to continue</span>
+          </div>
+        </div>
+
+        <!-- Full map -->
+        <div id="map-overlay" class="map-overlay is-hidden">
+          <canvas id="citymap" width="900" height="900" aria-label="City map"></canvas>
+          <p class="map-hint">M to close</p>
+        </div>
+      </section>
+
+      <!-- ---------------- Results ---------------- -->
+      <section id="results" class="results is-hidden" role="dialog" aria-label="Result">
+        <div class="results-card">
+          <p class="eyebrow" id="results-eyebrow">Complete</p>
+          <h2 id="results-title"></h2>
+          <p id="results-body"></p>
+          <div class="results-actions">
+            <button class="primary-button" id="results-primary" type="button">Continue</button>
+            <button class="link-button" id="results-secondary" type="button">Back to menu</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ---------------- Pause ---------------- -->
+      <section id="pause" class="pause is-hidden" role="dialog" aria-label="Paused">
+        <div class="pause-card">
+          <p class="eyebrow">Paused</p>
+          <h2 id="pause-title">Meridian City</h2>
+          <button class="primary-button" id="pause-resume" type="button">Resume</button>
+          <button class="link-button" id="pause-restart" type="button">Restart</button>
+          <button class="link-button" id="pause-quit" type="button">Quit to menu</button>
         </div>
       </section>
 
       <section id="error-screen" class="error-screen is-hidden" role="alert">
         <p class="eyebrow">Startup fault</p>
-        <h1>Couldn’t enter Meridian</h1>
+        <h1>Couldn't enter Meridian</h1>
         <pre id="error-message"></pre>
       </section>
     </main>

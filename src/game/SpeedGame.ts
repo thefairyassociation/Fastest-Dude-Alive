@@ -1,358 +1,861 @@
 import HavokPhysics from "@babylonjs/havok";
 import {
-  Color3,
   Color4,
   DefaultRenderingPipeline,
   FreeCamera,
   HavokPlugin,
   ImageProcessingConfiguration,
-  LinesMesh,
-  Mesh,
-  MeshBuilder,
+  Matrix,
   Scene,
-  StandardMaterial,
   Vector3,
 } from "@babylonjs/core";
-import { City } from "./City";
-import { Enemy } from "./Enemy";
-import { Hud } from "./Hud";
-import { Input } from "./Input";
-import { Player } from "./Player";
-import { TimeTrial, formatTime } from "./TimeTrial";
-import { createBestEngine } from "./engine";
+import { Input } from "./core/Input";
+import { clamp, damp, mulberry32, type Rng } from "./core/Rng";
+import { Save, type Quality } from "./core/Save";
+import { createBestEngine } from "./core/engine";
+import { City } from "./world/City";
+import { Player } from "./player/Player";
+import { Effects } from "./fx/Effects";
+import { Markers, type MarkerEntry } from "./fx/Markers";
+import { Rogue, rogueById } from "./npc/Rogue";
+import { Bystander, createBystanderMaterials } from "./npc/Bystander";
+import { Collectibles } from "./activities/Collectibles";
+import { RouteRun } from "./activities/RouteRun";
+import { RescueRun } from "./activities/RescueRun";
+import { RogueDuel } from "./activities/RogueDuel";
+import { buildRoutes } from "./activities/routes";
+import type { Activity, ActivityStatus, ActivityWorld } from "./activities/Activity";
+import { Campaign } from "./story/Campaign";
+import type { Chapter } from "./story/script";
+import { CHAPTERS } from "./story/script";
+import { Hud, type HudState } from "./ui/Hud";
+import { Dialogue } from "./ui/Dialogue";
+import { Menu } from "./ui/Menu";
 
-interface Effect {
-  mesh: Mesh | LinesMesh;
-  age: number;
-  duration: number;
-  grow: number;
-}
+type Mode = "menu" | "free" | "story";
 
+const STEP = 1 / 120;
+const BYSTANDER_POOL = 14;
+
+/**
+ * The shell.
+ *
+ * Owns the engine, the scene and the fixed-step loop, and hosts exactly two
+ * modes over one shared world: free roam and the campaign. Both drive the
+ * same city, player, effects and HUD — the difference is only who is deciding
+ * what the objective is.
+ */
 export class SpeedGame {
   private readonly input: Input;
+  private readonly save = new Save();
+  private readonly rng: Rng = mulberry32(0x5eed10);
+
   private scene!: Scene;
   private city!: City;
   private player!: Player;
-  private enemies: Enemy[] = [];
   private camera!: FreeCamera;
+  private pipeline!: DefaultRenderingPipeline;
+  private effects!: Effects;
+  private markers!: Markers;
+  private collectibles!: Collectibles;
   private hud!: Hud;
-  private trial!: TimeTrial;
-  private effects: Effect[] = [];
+  private dialogue!: Dialogue;
+  private menu!: Menu;
+  private world!: ActivityWorld;
+
+  private readonly rogues: Rogue[] = [];
+  private readonly bystanders: Bystander[] = [];
+  private bystandersInUse = 0;
+
+  private available: Activity[] = [];
+  private activity: Activity | null = null;
+  private campaign: Campaign | null = null;
+  private chapter: Chapter | null = null;
+  private mode: Mode = "menu";
+
   private accumulator = 0;
   private cameraYaw = 0;
-  private cameraPitch = 0.18;
+  private cameraPitch = 0.16;
+  private cameraRoll = 0;
+  private shake = 0;
   private focusActive = false;
-  private readonly dashVictims = new Set<number>();
+  private saveClock = 0;
+  private peakSpeed = 0;
+  private paused = true;
+  private nearestActivity: Activity | null = null;
+  /** What the results card is reporting; the primary button branches on it. */
+  private lastResult: "complete" | "failed" = "complete";
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     this.input = new Input(canvas);
   }
 
   async boot(): Promise<void> {
-    const loadingStatus = document.getElementById("loading-status");
-    if (loadingStatus) loadingStatus.textContent = "Negotiating with the GPU…";
+    const status = document.getElementById("loading-status");
+    const say = (message: string): void => {
+      if (status) status.textContent = message;
+    };
 
+    say("Negotiating with the GPU…");
     const { engine, renderer } = await createBestEngine(this.canvas);
     this.scene = new Scene(engine);
+    this.scene.clearColor = new Color4(0.05, 0.06, 0.07, 1);
 
-    if (loadingStatus) loadingStatus.textContent = "Waking Havok Physics V2…";
+    say("Waking Havok Physics V2…");
     try {
       const havok = await HavokPhysics();
-      const plugin = new HavokPlugin(true, havok);
-      this.scene.enablePhysics(new Vector3(0, -9.81, 0), plugin);
+      this.scene.enablePhysics(new Vector3(0, -9.81, 0), new HavokPlugin(true, havok));
     } catch (error) {
       console.warn("Havok failed to initialize; the kinematic controller remains playable.", error);
     }
 
-    if (loadingStatus) loadingStatus.textContent = "Building 2.5 km of Meridian City…";
-    this.city = new City(this.scene);
-    this.player = new Player(this.scene, this.city.start);
-    this.enemies = this.city.enemySpawns.map(
-      (spawn, index) => new Enemy(this.scene, index, spawn),
-    );
-    this.trial = new TimeTrial(this.scene, this.city.checkpointRoute);
-    this.hud = new Hud(this.city.extent);
-    this.hud.setRenderer(renderer);
+    const quality = this.save.settings.quality;
 
-    this.city.addShadowCaster(this.player.shadowCaster);
-    for (const enemy of this.enemies) {
-      this.city.addShadowCaster(enemy.shadowCaster);
+    say("Laying out 3.7 km of Meridian City…");
+    this.city = new City(this.scene, quality);
+
+    say("Suiting up…");
+    this.player = new Player(this.scene, this.city.start);
+    this.city.addShadowCaster(this.player.model.shadowCaster);
+
+    this.effects = new Effects(this.scene, this.player.model.ghostSource, quality);
+    this.effects.setReducedMotion(this.save.settings.reducedMotion);
+    this.markers = new Markers(this.scene);
+    this.collectibles = new Collectibles(this.scene, this.city, this.rng, this.save);
+
+    const bystanderMaterials = createBystanderMaterials(this.scene);
+    for (let i = 0; i < BYSTANDER_POOL; i += 1) {
+      const bystander = new Bystander(this.scene, this.rng, bystanderMaterials);
+      bystander.setEnabled(false);
+      this.bystanders.push(bystander);
     }
 
-    this.camera = new FreeCamera(
-      "speed-camera",
-      this.player.root.position.add(new Vector3(0, 7, -16)),
-      this.scene,
-    );
-    this.camera.minZ = 0.08;
-    this.camera.maxZ = 5200;
-    this.camera.fov = 0.92;
-    this.scene.activeCamera = this.camera;
+    this.setupCamera(quality);
 
-    // Filmic post stack: ACES tone mapping, gentle bloom for sun/glass
-    // highlights, FXAA and a light vignette. This replaces the old neon
-    // glow layer and does most of the "photographic" heavy lifting.
-    const pipeline = new DefaultRenderingPipeline("photographic", true, this.scene, [this.camera]);
-    pipeline.fxaaEnabled = true;
-    pipeline.bloomEnabled = true;
-    pipeline.bloomThreshold = 0.85;
-    pipeline.bloomWeight = 0.18;
-    pipeline.bloomKernel = 48;
-    pipeline.bloomScale = 0.5;
-    const processing = this.scene.imageProcessingConfiguration;
-    processing.toneMappingEnabled = true;
-    processing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
-    processing.exposure = 1.15;
-    processing.contrast = 1.06;
-    processing.vignetteEnabled = true;
-    processing.vignetteWeight = 1.4;
-    processing.vignetteColor = new Color4(0.03, 0.03, 0.04, 0);
+    this.hud = new Hud(this.city);
+    this.hud.setRenderer(renderer);
+    this.dialogue = new Dialogue(this.input);
+    this.menu = new Menu(this.save, {
+      onFreeRoam: () => this.startFreeRoam(),
+      onChapter: (chapter) => this.startChapter(chapter),
+      onResume: () => this.resume(),
+      onRestart: () => this.restart(),
+      onQuit: () => this.returnToMenu(),
+      onResultsPrimary: () => this.continueFromResults(),
+      onSettingsChanged: () => this.applySettings(),
+    });
 
+    this.world = this.createWorld();
+    this.available = this.buildFreeRoamActivities();
+    this.applySettings();
+
+    this.wireGlobalInput();
     this.finishBoot(engine);
   }
 
-  private finishBoot(engine: { resize(): void; getDeltaTime(): number; runRenderLoop(fn: () => void): void }): void {
+  /* ------------------------------------------------------------------ */
+  /* Boot helpers                                                        */
+  /* ------------------------------------------------------------------ */
+
+  private setupCamera(quality: Quality): void {
+    this.camera = new FreeCamera("chase-camera", this.city.start.add(new Vector3(0, 4, -9)), this.scene);
+    this.camera.minZ = 0.15;
+    this.camera.maxZ = this.city.extent * 3.2;
+    this.camera.fov = 0.95;
+    this.scene.activeCamera = this.camera;
+
+    // Filmic stack: ACES tone mapping, bloom for glass and emissives, FXAA,
+    // and a speed-driven chromatic aberration that only shows up at pace.
+    this.pipeline = new DefaultRenderingPipeline("photographic", true, this.scene, [this.camera]);
+    this.pipeline.fxaaEnabled = true;
+    this.pipeline.bloomEnabled = true;
+    this.pipeline.bloomThreshold = 0.82;
+    this.pipeline.bloomWeight = 0.24;
+    this.pipeline.bloomKernel = 48;
+    this.pipeline.bloomScale = 0.5;
+    this.pipeline.chromaticAberrationEnabled = quality !== "low";
+    this.pipeline.chromaticAberration.aberrationAmount = 0;
+    this.pipeline.grainEnabled = quality === "high";
+    if (this.pipeline.grainEnabled) this.pipeline.grain.intensity = 4;
+    this.pipeline.sharpenEnabled = quality === "high";
+
+    const processing = this.scene.imageProcessingConfiguration;
+    processing.toneMappingEnabled = true;
+    processing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
+    processing.exposure = 1.1;
+    processing.contrast = 1.08;
+    processing.vignetteEnabled = true;
+    processing.vignetteWeight = 1.5;
+    processing.vignetteColor = new Color4(0.03, 0.03, 0.04, 0);
+  }
+
+  private finishBoot(engine: {
+    resize(): void;
+    getDeltaTime(): number;
+    runRenderLoop(fn: () => void): void;
+  }): void {
     this.scene.executeWhenReady(() => {
       document.getElementById("loading")?.classList.add("is-hidden");
-      document.getElementById("hud")?.classList.remove("is-hidden");
-      this.hud.toast("Welcome to Meridian");
+      this.input.setEnabled(false);
+      this.menu.show();
     });
 
     window.addEventListener("resize", () => engine.resize());
 
     engine.runRenderLoop(() => {
       const frameDt = Math.min(0.05, engine.getDeltaTime() / 1000);
-      this.accumulator = Math.min(0.1, this.accumulator + frameDt);
 
-      let steps = 0;
-      while (this.accumulator >= 1 / 120 && steps < 12) {
-        this.fixedUpdate(1 / 120);
-        this.accumulator -= 1 / 120;
-        steps += 1;
+      const gamepadPause = this.input.pollPause();
+      if (gamepadPause && this.mode !== "menu" && !this.menu.resultsVisible) {
+        if (this.paused) this.resume();
+        else this.pauseGame();
       }
 
-      this.updateCamera(frameDt);
-      this.updateEffects(frameDt);
-      this.hud.update(this.player, this.enemies, this.trial, this.focusActive);
+      if (!this.paused) {
+        this.accumulator = Math.min(0.12, this.accumulator + frameDt);
+        let steps = 0;
+        // Bounded catch-up: a long stall must not spiral into a freeze.
+        while (this.accumulator >= STEP && steps < 12) {
+          this.fixedUpdate(STEP);
+          this.accumulator -= STEP;
+          steps += 1;
+        }
+        this.updateCamera(frameDt);
+        this.effects.update(frameDt, this.player, this.focusActive);
+        this.markers.update(frameDt, this.player.position);
+        this.city.sky.update(frameDt);
+        this.city.updateStreaming(this.player.position);
+        this.scene.imageProcessingConfiguration.exposure = this.city.sky.exposure;
+        this.hud.update(frameDt, this.player, this.hudState());
+      }
+
       this.scene.render();
     });
   }
 
-  private fixedUpdate(dt: number): void {
-    if (this.input.consume("KeyT")) {
-      this.trial.start();
-      this.hud.toast("Meridian Loop started");
+  private wireGlobalInput(): void {
+    this.canvas.addEventListener("click", () => {
+      if (this.mode !== "menu" && !this.paused && !this.dialogue.active) {
+        this.input.requestPointerLock();
+      }
+    });
+
+    window.addEventListener("keydown", (event) => {
+      if (event.code === "Escape") {
+        if (this.mode === "menu") return;
+        if (this.menu.resultsVisible) return;
+        if (this.paused) this.resume();
+        else this.pauseGame();
+      }
+    });
+  }
+
+  private createWorld(): ActivityWorld {
+    return {
+      city: this.city,
+      player: this.player,
+      effects: this.effects,
+      save: this.save,
+      rng: this.rng,
+      toast: (message: string) => this.hud.toast(message),
+      spawnRogue: (id: string, position: Vector3) => {
+        const rogue = new Rogue(this.scene, rogueById(id), position);
+        this.city.addShadowCaster(rogue.shadowCaster);
+        this.rogues.push(rogue);
+        return rogue;
+      },
+      clearRogues: () => {
+        for (const rogue of this.rogues) rogue.dispose();
+        this.rogues.length = 0;
+      },
+      activeRogues: () => this.rogues,
+      takeBystander: () => {
+        const bystander = this.bystanders[this.bystandersInUse];
+        if (!bystander) return null;
+        this.bystandersInUse += 1;
+        return bystander;
+      },
+      releaseBystanders: () => {
+        for (const bystander of this.bystanders) {
+          bystander.setEnabled(false);
+          bystander.mood = "idle";
+        }
+        this.bystandersInUse = 0;
+      },
+    };
+  }
+
+  private buildFreeRoamActivities(): Activity[] {
+    const activities: Activity[] = [];
+    for (const route of buildRoutes(this.city)) activities.push(new RouteRun(route));
+
+    activities.push(
+      new RescueRun(
+        "rescue-old-meridian",
+        "Warehouse Collapse",
+        this.city.nearestRoad(new Vector3(-450, 0, -900)),
+        7,
+        70,
+        340,
+      ),
+      new RescueRun(
+        "rescue-docks",
+        "Container Stack Failure",
+        this.city.nearestRoad(new Vector3(1350, 0, 300)),
+        6,
+        62,
+        300,
+      ),
+    );
+
+    // Duels are parked at landmarks so the city itself tells you where a
+    // fight lives, and they only spawn anybody once you say go.
+    const duelSpots: Array<[string, string]> = [
+      ["kiln", "sable-arena"],
+      ["gale", "ledger-tower"],
+      ["coldsnap", "ridgeline-transit"],
+      ["ricochet", "kestrel-bridge"],
+      ["hollow", "corbin-green"],
+    ];
+    for (const [rogue, landmark] of duelSpots) {
+      activities.push(new RogueDuel(rogue, this.city.landmark(landmark).position.clone()));
     }
 
-    this.player.update(dt, this.input, this.cameraYaw, this.city);
-    this.focusActive = this.input.down("KeyF") && this.player.useFocus(dt);
+    return activities;
+  }
 
-    this.handleCombat();
-    this.handleEnemies(dt);
-    this.handleTrial(dt);
+  private applySettings(): void {
+    const settings = this.save.settings;
+    this.input.lookSensitivity = settings.lookSensitivity;
+    this.effects.setReducedMotion(settings.reducedMotion);
+    this.city.setDetailRadius(
+      settings.quality === "low" ? 260 : settings.quality === "medium" ? 420 : 620,
+    );
+  }
 
-    if (this.player.health <= 0) {
-      this.player.health = 40;
-      this.player.recover(this.city);
-      this.hud.toast("Timeline reset");
+  /* ------------------------------------------------------------------ */
+  /* Mode control                                                        */
+  /* ------------------------------------------------------------------ */
+
+  private startFreeRoam(): void {
+    this.teardownRun();
+    this.mode = "free";
+    this.chapter = null;
+    this.city.sky.setAtmosphere("golden", true);
+    this.input.releaseAll();
+    this.player.teleport(this.city.start);
+    this.player.health = 100;
+    this.player.charge = 50;
+    this.hud.setVisible(true);
+    this.hud.toast("Meridian City — open");
+    this.resume();
+  }
+
+  private startChapter(chapter: Chapter): void {
+    this.teardownRun();
+    this.mode = "story";
+    this.chapter = chapter;
+    this.player.health = 100;
+    this.player.charge = 60;
+    this.campaign = new Campaign(chapter, this.world, this.dialogue);
+    this.campaign.start();
+    this.input.releaseAll();
+    this.save.update((profile) => {
+      profile.campaign.current = chapter.id;
+    });
+    this.hud.setVisible(true);
+    this.hud.toast(`${chapter.title}`);
+    this.resume();
+  }
+
+  private restart(): void {
+    if (this.mode === "story" && this.chapter) {
+      const chapter = this.chapter;
+      this.menu.hidePause();
+      this.startChapter(chapter);
+      return;
+    }
+    this.menu.hidePause();
+    this.startFreeRoam();
+  }
+
+  private returnToMenu(): void {
+    this.teardownRun();
+    this.mode = "menu";
+    this.paused = true;
+    this.hud.setVisible(false);
+    this.hud.closeMap();
+    this.menu.hidePause();
+    this.menu.hideResults();
+    this.input.releasePointerLock();
+    this.input.setEnabled(false);
+    this.save.flush();
+    this.menu.show();
+  }
+
+  private teardownRun(): void {
+    this.activity?.stop(this.world);
+    this.activity = null;
+    this.campaign?.stop();
+    this.campaign = null;
+    this.world.clearRogues();
+    this.world.releaseBystanders();
+    this.markers.clear();
+    this.dialogue.hide();
+    this.accumulator = 0;
+  }
+
+  private pauseGame(): void {
+    if (this.mode === "menu") return;
+    this.paused = true;
+    this.input.setEnabled(false);
+    this.input.releasePointerLock();
+    this.menu.showPause(this.chapter ? this.chapter.title : "Meridian City");
+  }
+
+  private resume(): void {
+    this.menu.hidePause();
+    this.menu.hideResults();
+    this.paused = false;
+    this.input.setEnabled(true);
+    this.accumulator = 0;
+  }
+
+  private continueFromResults(): void {
+    this.menu.hideResults();
+
+    if (this.mode === "story" && this.chapter) {
+      // The button says "Retry chapter" on a failure and "Next chapter" on a
+      // win. One handler serves both, so it has to know which it is.
+      if (this.lastResult === "failed") {
+        this.startChapter(this.chapter);
+        return;
+      }
+      const next = CHAPTERS[CHAPTERS.indexOf(this.chapter) + 1];
+      if (next && next.number <= this.save.data.campaign.unlocked) {
+        this.startChapter(next);
+        return;
+      }
+      this.returnToMenu();
+      return;
+    }
+    this.resume();
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Simulation                                                          */
+  /* ------------------------------------------------------------------ */
+
+  private fixedUpdate(dt: number): void {
+    // Sample pad edges once per step, alongside the keyboard's.
+    this.input.poll();
+    const talking = this.dialogue.active;
+
+    if (this.input.consume("map")) this.hud.toggleMap();
+    if (talking) {
+      // The dialogue shares its advance key with jump, so the player must not
+      // read input at all while a conversation is up — it would eat the press.
+      this.focusActive = false;
+      this.player.idle(dt, this.city);
+    } else {
+      const events = this.player.update(dt, this.input, this.cameraYaw, this.city);
+      this.focusActive = this.input.down("focus") && this.player.useFocus(dt);
+      this.player.focusHeld = this.focusActive;
+      this.handlePlayerEvents(events);
+      this.handleCombat();
+    }
+
+    const npcDt = this.focusActive ? dt * 0.16 : dt;
+    this.updateRogues(npcDt);
+    for (const bystander of this.bystanders) bystander.update(npcDt);
+
+    if (this.collectibles.update(dt, this.player.position, this.effects)) {
+      this.hud.toast(`Resonance mote · ${this.collectibles.found}/${this.collectibles.total}`);
+      this.player.charge = Math.min(100, this.player.charge + 8);
+    }
+
+    if (this.mode === "story") this.updateStory(dt);
+    else this.updateFreeRoam(dt);
+
+    if (this.player.health <= 0) this.handleDown();
+
+    this.markers.set(this.currentMarkers());
+    this.trackProfile(dt);
+  }
+
+  private updateStory(dt: number): void {
+    const campaign = this.campaign;
+    if (!campaign) return;
+    const result = campaign.update(dt, this.input);
+    if (result === "complete") {
+      const chapter = campaign.chapter;
+      const index = CHAPTERS.indexOf(chapter);
+      this.save.completeChapter(chapter.id, index);
+      const next = CHAPTERS[index + 1];
+      campaign.stop();
+      this.campaign = null;
+      this.paused = true;
+      this.input.releasePointerLock();
+      this.input.setEnabled(false);
+      this.lastResult = "complete";
+      this.menu.showResults(
+        `Chapter ${chapter.number} complete`,
+        chapter.title,
+        next
+          ? `${chapter.subtitle}. Next: ${next.title} — ${next.subtitle}.`
+          : "That is the end of the campaign as written. Free roam keeps the city open.",
+        next ? "Next chapter" : "Back to menu",
+      );
+    } else if (result === "failed") {
+      campaign.stop();
+      this.campaign = null;
+      this.paused = true;
+      this.input.releasePointerLock();
+      this.input.setEnabled(false);
+      this.lastResult = "failed";
+      this.menu.showResults(
+        "Chapter failed",
+        campaign.chapter.title,
+        "Meridian is still standing. Take it again from the top of the chapter.",
+        "Retry chapter",
+      );
     }
   }
 
-  private handleCombat(): void {
-    if (!this.player.dashing) this.dashVictims.clear();
+  private updateFreeRoam(dt: number): void {
+    // Offer whatever is closest; T starts it, or abandons a running one.
+    this.nearestActivity = this.activity ? null : this.findNearestActivity();
 
-    if (this.player.dashing) {
-      for (const enemy of this.enemies) {
-        if (
-          enemy.alive &&
-          !this.dashVictims.has(enemy.id) &&
-          Vector3.DistanceSquared(enemy.position, this.player.root.position) < 6.5 * 6.5
-        ) {
-          this.dashVictims.add(enemy.id);
-          const impulse = this.forward().scale(75);
-          const defeated = enemy.hit(2.5, impulse);
-          this.player.registerHit(2);
-          this.spawnPulse(enemy.position, "#ffc38a", 5);
-          this.hud.flashAbility("ability-dash");
-          if (defeated) this.hud.toast("Drone outrun");
-        }
-      }
-    }
-
-    if (this.input.consume("Mouse0") && this.player.canStrike()) {
-      this.player.useStrike();
-      const target = this.findTarget(16, -0.35);
-      if (target) {
-        const damage = 1.25 + this.player.speedRatio * 1.5;
-        const defeated = target.hit(damage, this.forward().scale(34));
-        this.player.registerHit();
-        this.spawnPulse(target.position, "#ffe0b0", 3);
-        if (defeated) this.hud.toast("Velocity takedown");
+    if (this.input.consume("activity")) {
+      if (this.activity) {
+        this.activity.stop(this.world);
+        this.activity = null;
+        this.hud.toast("Activity abandoned");
+      } else if (this.nearestActivity) {
+        this.activity = this.nearestActivity;
+        this.activity.start(this.world);
       } else {
-        this.spawnPulse(this.player.root.position, "#d6dee3", 1.5);
+        this.hud.toast("Nothing to start here — look for a marker");
       }
     }
 
-    if (this.input.consume("KeyE") && this.player.canBolt()) {
-      const target = this.findTarget(125, 0.15);
+    const activity = this.activity;
+    if (!activity) return;
+
+    const result = activity.update(dt, this.world);
+    if (result === "complete") {
+      this.hud.toast(activity.successMessage());
+      activity.stop(this.world);
+      this.activity = null;
+    } else if (result === "failed") {
+      this.hud.toast(`${activity.name} failed`);
+      activity.stop(this.world);
+      this.activity = null;
+    }
+  }
+
+  private findNearestActivity(): Activity | null {
+    let best: Activity | null = null;
+    let bestSq = 150 * 150;
+    for (const candidate of this.available) {
+      const distanceSq = Vector3.DistanceSquared(candidate.anchor, this.player.position);
+      if (distanceSq < bestSq) {
+        bestSq = distanceSq;
+        best = candidate;
+      }
+    }
+    return best;
+  }
+
+  private handleDown(): void {
+    this.player.health = 45;
+    this.player.recover(this.city);
+    this.effects.pulse(this.player.position, "danger", 12);
+    this.hud.toast("Pulled out — you are not invincible");
+    if (this.activity) {
+      this.activity.stop(this.world);
+      this.activity = null;
+    }
+  }
+
+  private handlePlayerEvents(events: ReturnType<Player["update"]>): void {
+    const position = this.player.position;
+    if (events.landed) {
+      this.effects.burst(position, 14, "pale");
+      this.shake = Math.max(this.shake, 0.35);
+    }
+    if (events.jumped) this.effects.pulse(position, "pale", 4, 0.3);
+    if (events.wallJumped) {
+      this.effects.pulse(position, "cool", 6, 0.3);
+      this.effects.burst(position, 12, "cool");
+    }
+    if (events.dashed) {
+      this.effects.pulse(position, "warm", 9, 0.32);
+      this.shake = Math.max(this.shake, 0.5);
+    }
+    if (events.footstep && this.player.speed > 60) this.effects.burst(position, 4, "pale");
+    if (events.waterSpray) this.effects.burst(position, 6, "cool");
+    if (events.sank) this.hud.toast("Too slow across the river");
+    if (events.struck) this.hud.flashAbility("ability-dash");
+  }
+
+  /* ---------------- combat ---------------- */
+
+  private handleCombat(): void {
+    const player = this.player;
+    const position = player.position;
+
+    // Body checks: at pace, contact is the attack.
+    if (player.speed > 85 || player.dashing) {
+      for (const rogue of this.rogues) {
+        if (!rogue.alive) continue;
+        if (Vector3.DistanceSquared(rogue.position, position) > 5 * 5) continue;
+        const accepted = rogue.vulnerable;
+        const power = 1.5 + player.speedRatio * 2.5;
+        const heading = player.velocity.normalizeToNew();
+        if (rogue.hit(power, heading.x * 30, heading.z * 30)) this.onRogueDefeated(rogue);
+        else this.effects.pulse(rogue.position, "warm", 6);
+        if (accepted) player.registerHit(2);
+      }
+    }
+
+    if (this.input.consume("strike") && player.canStrike()) {
+      player.useStrike();
+      const target = this.findTarget(14, -0.3);
       if (target) {
-        this.player.useBolt();
-        const from = this.player.root.position.add(new Vector3(0, 2.4, 0));
-        const to = target.position.clone();
-        const defeated = target.hit(2.15, to.subtract(from).normalize().scale(20));
-        this.spawnBolt(from, to);
-        this.player.registerHit(1.5);
+        const accepted = target.vulnerable;
+        const damage = 1.4 + player.speedRatio * 1.8;
+        const heading = this.headingVector();
+        if (target.hit(damage, heading.x * 22, heading.z * 22)) this.onRogueDefeated(target);
+        else this.effects.pulse(target.position, "warm", 4);
+        this.effects.burst(target.position, 16, "warm");
+        if (accepted) player.registerHit();
+      } else {
+        this.effects.pulse(position, "pale", 2, 0.25);
+      }
+    }
+
+    if (this.input.consume("bolt") && player.canBolt()) {
+      const target = this.findTarget(120, 0.1);
+      if (target) {
+        player.useBolt();
+        const from = position.add(new Vector3(0, 1.2, 0));
+        this.effects.bolt(from, target.position.add(new Vector3(0, 1, 0)));
+        const away = target.position.subtract(position).normalize();
+        const accepted = target.vulnerable;
+        if (target.hit(2.2, away.x * 14, away.z * 14)) this.onRogueDefeated(target);
+        if (accepted) player.registerHit(1.5);
         this.hud.flashAbility("ability-bolt");
-        if (defeated) this.hud.toast("Circuit broken");
       } else {
         this.hud.toast("No target in arc");
       }
     }
 
-    if (this.input.consume("KeyQ") && this.player.canPulse()) {
-      this.player.usePulse();
-      let hitCount = 0;
-      for (const enemy of this.enemies) {
-        const away = enemy.position.subtract(this.player.root.position);
+    if (this.input.consume("pulse") && player.canPulse()) {
+      player.usePulse();
+      let hits = 0;
+      for (const rogue of this.rogues) {
+        if (!rogue.alive) continue;
+        const away = rogue.position.subtract(position);
         const distance = away.length();
-        if (!enemy.alive || distance > 38 || distance < 0.01) continue;
-        const defeated = enemy.hit(2.4, away.scale(58 / distance));
-        hitCount += 1;
-        this.player.registerHit(1.5);
-        if (defeated) this.hud.toast("Pulse takedown");
+        if (distance > 34 || distance < 0.01) continue;
+        const scale = 44 / distance;
+        const accepted = rogue.vulnerable;
+        if (rogue.hit(2.4, away.x * scale, away.z * scale)) this.onRogueDefeated(rogue);
+        if (accepted) {
+          hits += 1;
+          player.registerHit(1.5);
+        }
       }
-      this.spawnPulse(this.player.root.position, "#e6edf2", 18);
+      this.effects.pulse(position, "pale", 30, 0.5);
       this.hud.flashAbility("ability-pulse");
-      if (hitCount === 0) this.hud.toast("Kinetic pulse");
+      if (hits === 0) this.hud.toast("Kinetic pulse");
     }
   }
 
-  private handleEnemies(dt: number): void {
-    const enemyDt = dt * (this.focusActive ? 0.13 : 1);
-    for (const enemy of this.enemies) {
-      const damage = enemy.update(enemyDt, this.player.root.position);
-      if (damage > 0 && this.player.damage(damage, enemy.position)) {
-        this.spawnPulse(this.player.root.position, "#ff5a4e", 4);
-        this.hud.toast("Dampener strike");
+  private updateRogues(dt: number): void {
+    const player = this.player;
+    for (const rogue of this.rogues) {
+      const groundY = this.city.groundHeight(rogue.position.x, rogue.position.z, rogue.position.y + 3);
+      const outcome = rogue.update(dt, player.position, groundY);
+
+      if (outcome.telegraph) this.effects.pulse(rogue.position, "danger", 5, 0.3);
+      if (outcome.projectile) {
+        this.effects.bolt(rogue.position.add(new Vector3(0, 1.4, 0)), outcome.projectile);
+        this.effects.pulse(outcome.projectile, "danger", 14, 0.4);
+      }
+      if (outcome.damage > 0 && player.damage(outcome.damage, rogue.position)) {
+        this.effects.burst(player.position, 20, "danger");
+        this.shake = Math.max(this.shake, 0.7);
+        this.hud.toast(`${rogue.definition.codename} connected`);
+      }
+      if (outcome.defeated) this.onRogueDefeated(rogue);
+
+      // Dampening fields bleed momentum off anyone standing in them.
+      for (const field of rogue.fields) {
+        if (Vector3.DistanceSquared(field.position, player.position) > field.radius * field.radius) continue;
+        player.velocity.scaleInPlace(Math.exp(-3.4 * dt));
       }
     }
   }
 
-  private handleTrial(dt: number): void {
-    const update = this.trial.update(dt, this.player.root.position);
-    if (update.checkpoint && !update.finished) {
-      this.player.charge = Math.min(100, this.player.charge + 12);
-      this.hud.toast("Split captured");
-    }
-    if (update.finished) {
-      this.hud.toast(
-        update.newBest
-          ? `New best · ${formatTime(this.trial.elapsed)}`
-          : `Loop clear · ${formatTime(this.trial.elapsed)}`,
-      );
-    }
+  private onRogueDefeated(rogue: Rogue): void {
+    this.effects.pulse(rogue.position, "warm", 20, 0.6);
+    this.effects.burst(rogue.position, 40, "warm");
+    this.hud.toast(`${rogue.definition.codename} is down`);
   }
 
-  private updateCamera(dt: number): void {
-    const look = this.input.takeLook();
-    this.cameraYaw -= look.x * 0.00215;
-    this.cameraPitch = clamp(this.cameraPitch - look.y * 0.0016, -0.08, 0.48);
-
-    const forward = new Vector3(Math.sin(this.cameraYaw), 0, Math.cos(this.cameraYaw));
-    const speedRatio = this.player.speedRatio;
-    const distance = 12 + speedRatio * 19;
-    const height = 5.2 + speedRatio * 6 + this.cameraPitch * 16;
-    const desired = this.player.root.position
-      .subtract(forward.scale(distance))
-      .addInPlaceFromFloats(0, height, 0);
-
-    const smoothing = 1 - Math.exp(-(7.5 - speedRatio * 3.5) * dt);
-    Vector3.LerpToRef(this.camera.position, desired, smoothing, this.camera.position);
-    const target = this.player.root.position
-      .add(forward.scale(5 + speedRatio * 24))
-      .addInPlaceFromFloats(0, 2.1 + this.cameraPitch * 3, 0);
-    this.camera.setTarget(target);
-    this.camera.fov = 0.9 + speedRatio * 0.3 + (this.focusActive ? 0.06 : 0);
-  }
-
-  private updateEffects(dt: number): void {
-    const survivors: Effect[] = [];
-    for (const effect of this.effects) {
-      effect.age += dt;
-      const progress = Math.min(1, effect.age / effect.duration);
-      effect.mesh.visibility = 1 - progress;
-      if (effect.grow > 0) {
-        effect.mesh.scaling.setAll(0.2 + progress * effect.grow);
-      }
-      if (progress >= 1) {
-        effect.mesh.dispose();
-      } else {
-        survivors.push(effect);
-      }
-    }
-    this.effects = survivors;
-  }
-
-  private findTarget(maxDistance: number, minDot: number): Enemy | null {
-    const origin = this.player.root.position;
-    const forward = this.forward();
-    let best: Enemy | null = null;
+  private findTarget(maxDistance: number, minDot: number): Rogue | null {
+    const origin = this.player.position;
+    const forward = this.headingVector();
+    let best: Rogue | null = null;
     let bestScore = Number.POSITIVE_INFINITY;
 
-    for (const enemy of this.enemies) {
-      if (!enemy.alive) continue;
-      const offset = enemy.position.subtract(origin);
+    for (const rogue of this.rogues) {
+      if (!rogue.alive) continue;
+      const offset = rogue.position.subtract(origin);
       const distance = offset.length();
       if (distance > maxDistance || distance < 0.01) continue;
-      const dot = Vector3.Dot(offset.scale(1 / distance), forward);
+      const dot = (offset.x * forward.x + offset.z * forward.z) / distance;
       if (dot < minDot) continue;
       const score = distance * (1.35 - dot);
       if (score < bestScore) {
-        best = enemy;
+        best = rogue;
         bestScore = score;
       }
     }
     return best;
   }
 
-  private forward(): Vector3 {
+  private headingVector(): Vector3 {
     if (this.player.speed > 1) return this.player.velocity.normalizeToNew();
     return new Vector3(Math.sin(this.cameraYaw), 0, Math.cos(this.cameraYaw));
   }
 
-  private spawnPulse(position: Vector3, color: string, diameter: number): void {
-    const ring = MeshBuilder.CreateTorus(
-      "combat-pulse",
-      { diameter, thickness: Math.max(0.08, diameter * 0.03), tessellation: 36 },
-      this.scene,
+  /* ------------------------------------------------------------------ */
+  /* Presentation                                                        */
+  /* ------------------------------------------------------------------ */
+
+  private updateCamera(dt: number): void {
+    if (!this.dialogue.active) {
+      const look = this.input.takeLook();
+      this.cameraYaw -= look.x * 0.0022;
+      this.cameraPitch = clamp(this.cameraPitch - look.y * 0.0017, -0.22, 0.5);
+    }
+
+    const player = this.player;
+    const ratio = player.speedRatio;
+    const forward = new Vector3(Math.sin(this.cameraYaw), 0, Math.cos(this.cameraYaw));
+
+    // Pull back and drop low as speed rises; the horizon does the work.
+    const distance = 6.2 + ratio * 7.5;
+    const height = 2.4 + ratio * 1.6 + this.cameraPitch * 9;
+    const desired = player.position
+      .subtract(forward.scale(distance))
+      .addInPlaceFromFloats(0, height, 0);
+
+    // Never let the camera sit inside a building.
+    const surface = this.city.groundHeight(desired.x, desired.z, desired.y) + 1.4;
+    if (desired.y < surface) desired.y = surface;
+
+    const smoothing = damp(9 - ratio * 4, dt);
+    Vector3.LerpToRef(this.camera.position, desired, smoothing, this.camera.position);
+
+    this.shake = Math.max(0, this.shake - dt * 2.4);
+    if (this.shake > 0 && !this.save.settings.reducedMotion) {
+      const amount = this.shake * this.shake * 0.5;
+      this.camera.position.addInPlaceFromFloats(
+        (Math.random() - 0.5) * amount,
+        (Math.random() - 0.5) * amount,
+        (Math.random() - 0.5) * amount,
+      );
+    }
+
+    // Roll the horizon during wall runs — the single clearest read that the
+    // player is no longer on the ground.
+    const targetRoll = player.state === "wall" ? player.wallSide * 0.42 : 0;
+    this.cameraRoll += (targetRoll - this.cameraRoll) * damp(6, dt);
+    const up = Vector3.TransformNormal(
+      Vector3.Up(),
+      Matrix.RotationAxis(forward, this.cameraRoll),
     );
-    ring.position.copyFrom(position);
-    ring.position.y += 0.45;
-    const pulseMaterial = new StandardMaterial("combat-pulse-material", this.scene);
-    pulseMaterial.diffuseColor = Color3.FromHexString(color);
-    pulseMaterial.emissiveColor = Color3.FromHexString(color);
-    pulseMaterial.disableLighting = true;
-    ring.material = pulseMaterial;
-    this.effects.push({ mesh: ring, age: 0, duration: 0.45, grow: 2.8 });
+    this.camera.upVector.copyFrom(up);
+
+    const target = player.position
+      .add(forward.scale(4 + ratio * 12))
+      .addInPlaceFromFloats(0, 1.4 + this.cameraPitch * 2.5, 0);
+    this.camera.setTarget(target);
+    this.camera.fov = 0.92 + ratio * 0.34 + (this.focusActive ? 0.05 : 0);
+
+    if (this.pipeline.chromaticAberrationEnabled) {
+      this.pipeline.chromaticAberration.aberrationAmount = ratio * ratio * 22;
+    }
   }
 
-  private spawnBolt(from: Vector3, to: Vector3): void {
-    const middle = Vector3.Lerp(from, to, 0.5);
-    middle.addInPlaceFromFloats(
-      (Math.random() - 0.5) * 4,
-      2 + Math.random() * 3,
-      (Math.random() - 0.5) * 4,
-    );
-    const bolt = MeshBuilder.CreateLines(
-      "arc-bolt",
-      { points: [from, Vector3.Lerp(from, middle, 0.55), middle, Vector3.Lerp(middle, to, 0.55), to] },
-      this.scene,
-    );
-    bolt.color = Color3.FromHexString("#aacfff");
-    this.effects.push({ mesh: bolt, age: 0, duration: 0.18, grow: 0 });
-  }
-}
+  private currentMarkers(): MarkerEntry[] {
+    if (this.campaign) return this.campaign.markers();
+    if (this.activity) return this.activity.markers();
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
+    const entries: MarkerEntry[] = [];
+    const mote = this.collectibles.nearest(this.player.position, 220);
+    if (mote) entries.push({ position: mote, style: "collectible", radius: 5 });
+    if (this.nearestActivity) {
+      entries.push({ position: this.nearestActivity.anchor, style: "objective", radius: 14 });
+    }
+    return entries;
+  }
+
+  private hudState(): HudState {
+    const objective = this.currentObjective();
+    const rogue = this.rogues.find((candidate) => candidate.alive) ?? null;
+    return {
+      modeLabel: this.mode === "story" ? `Story · ${this.chapter?.title ?? ""}` : "Free roam",
+      objective,
+      focusActive: this.focusActive,
+      markers: this.currentMarkers(),
+      rogue,
+      prompt:
+        this.mode === "free" && this.nearestActivity
+          ? { title: this.nearestActivity.name, detail: this.nearestActivity.summary }
+          : null,
+      motesFound: this.collectibles.found,
+      motesTotal: this.collectibles.total,
+      showMph: this.save.settings.showSpeedInMph,
+      dialogueActive: this.dialogue.active,
+    };
+  }
+
+  private currentObjective(): ActivityStatus {
+    if (this.campaign) {
+      const status = this.campaign.status();
+      return {
+        title: status.title,
+        detail: `${status.detail} · beat ${this.campaign.beatNumber}/${this.campaign.beatCount}`,
+        progress: status.progress,
+        timer: status.timer,
+      };
+    }
+    if (this.activity) return this.activity.status();
+    return {
+      title: "Free roam",
+      detail: `${this.city.districtNameAt(this.player.position.x, this.player.position.z)} · press T at a marker`,
+    };
+  }
+
+  private trackProfile(dt: number): void {
+    // Sample the peak every step; only write to the profile every couple of
+    // seconds, so a personal best is never missed between flushes.
+    this.peakSpeed = Math.max(this.peakSpeed, this.player.speedKph);
+
+    this.saveClock += dt;
+    if (this.saveClock < 2) return;
+    this.saveClock = 0;
+    const distance = this.player.distance;
+    const top = this.peakSpeed;
+    this.save.update((profile) => {
+      profile.totalDistanceMeters += distance;
+      profile.topSpeedKph = Math.max(profile.topSpeedKph, top);
+    });
+    this.player.distance = 0;
+  }
 }
