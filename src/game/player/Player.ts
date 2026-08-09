@@ -3,6 +3,7 @@ import { approach, clamp, damp } from "../core/Rng";
 import type { Input } from "../core/Input";
 import type { City, MoveResult } from "../world/City";
 import { HeroModel } from "./HeroModel";
+import { PathRecorder } from "./Remnant";
 
 /**
  * The speed controller.
@@ -32,6 +33,9 @@ const STEP_HEIGHT = 0.55;
 /** Below this you cannot stay on top of the river. */
 const WATER_RUN_SPEED = 34;
 
+/** Speed ratio above which a strike becomes a mass strike. */
+export const MASS_STRIKE_RATIO = 0.55;
+
 export type TraversalState = "ground" | "air" | "wall" | "vertical" | "slide";
 
 export interface PlayerEvents {
@@ -45,6 +49,10 @@ export interface PlayerEvents {
   waterSpray: boolean;
   sank: boolean;
   struck: boolean;
+  /** Solid-phase engage this step. */
+  phased: boolean;
+  /** A sustained high-speed orbit just became a vortex. */
+  vortex: boolean;
 }
 
 export class Player {
@@ -53,6 +61,7 @@ export class Player {
   readonly velocity = Vector3.Zero();
   readonly radius = BODY_RADIUS;
   readonly height = BODY_HEIGHT;
+  readonly pathRecorder = new PathRecorder();
 
   health = 100;
   charge = 50;
@@ -63,6 +72,8 @@ export class Player {
   boltCooldown = 0;
   pulseCooldown = 0;
   strikeCooldown = 0;
+  phaseCooldown = 0;
+  remnantCooldown = 0;
   invulnerable = 0;
   strikeTimer = 0;
 
@@ -71,6 +82,13 @@ export class Player {
   /** Metres travelled this session, for the profile. */
   distance = 0;
   focusHeld = false;
+
+  /**
+   * Set by the world when standing in a traversal-denial field (Anchor).
+   * Wall/vertical/water running fail, and speed is soft-capped.
+   */
+  traversalDenied = false;
+  speedCap: number | null = null;
 
   private readonly move: MoveResult = {
     grounded: true,
@@ -90,14 +108,21 @@ export class Player {
     waterSpray: false,
     sank: false,
     struck: false,
+    phased: false,
+    vortex: false,
   };
 
   private readonly wallNormal = new Vector3();
   private readonly heading = new Vector3(0, 0, 1);
   private readonly scratch = new Vector3();
   private readonly desired = new Vector3();
+  private readonly vortexCenter = new Vector3();
 
   private dashTimer = 0;
+  private phaseTimer = 0;
+  private vortexTimer = 0;
+  private yawAccum = 0;
+  private orbitClock = 0;
   private airDashAvailable = true;
   private coyote = 0;
   private wallTimer = 0;
@@ -141,8 +166,24 @@ export class Player {
     return this.dashTimer > 0;
   }
 
+  get phasing(): boolean {
+    return this.phaseTimer > 0;
+  }
+
+  get vortexActive(): boolean {
+    return this.vortexTimer > 0;
+  }
+
+  get vortexPullCenter(): Vector3 {
+    return this.vortexCenter;
+  }
+
   get grounded(): boolean {
     return this.state === "ground" || this.state === "slide";
+  }
+
+  get massStrikeReady(): boolean {
+    return this.speedRatio >= MASS_STRIKE_RATIO;
   }
 
   /* ------------------------------------------------------------------ */
@@ -150,8 +191,11 @@ export class Player {
   update(dt: number, input: Input, cameraYaw: number, city: City): PlayerEvents {
     this.resetEvents();
     this.tickResources(dt);
+    this.pathRecorder.record(dt, this.root.position);
 
     if (input.consume("recover")) this.recover(city);
+
+    if (input.consume("phase")) this.tryPhase();
 
     const movement = input.movement();
     const sin = Math.sin(cameraYaw);
@@ -186,6 +230,7 @@ export class Player {
 
     this.integrate(dt, city);
     this.updateFacing(dt);
+    this.trackVortex(dt);
     this.animate(dt);
     return this.events;
   }
@@ -201,6 +246,7 @@ export class Player {
     this.resetEvents();
     this.tickResources(dt);
     this.focusHeld = false;
+    this.pathRecorder.record(dt, this.root.position);
 
     if (this.state === "wall" || this.state === "vertical") this.detachWall(0.2);
     this.setHorizontalSpeed(approach(this.speed, 0, BRAKE * 1.6 * dt));
@@ -255,6 +301,7 @@ export class Player {
       }
     }
 
+    if (this.speedCap !== null) speed = Math.min(speed, this.speedCap);
     this.setHorizontalSpeed(speed);
 
     if (wantsJump) {
@@ -263,7 +310,7 @@ export class Player {
     }
 
     // Running flat into a facade fast enough converts speed into altitude.
-    if (!sliding && speed > 48 && this.tryVerticalRun(city)) return;
+    if (!sliding && !this.traversalDenied && speed > 48 && this.tryVerticalRun(city)) return;
 
     this.coyote = 0.12;
   }
@@ -284,15 +331,23 @@ export class Player {
 
     // Air control: real but reduced, so a jump commits without feeling stiff.
     if (hasInput) this.steer(desired, this.speed, dt, 0.42);
+    if (this.speedCap !== null && this.speed > this.speedCap) {
+      this.setHorizontalSpeed(this.speedCap);
+    }
 
     this.velocity.y = Math.max(-TERMINAL, this.velocity.y - GRAVITY * dt);
 
-    if (this.wallCooldown <= 0 && this.speed > 22) {
+    if (!this.traversalDenied && this.wallCooldown <= 0 && this.speed > 22) {
       this.tryWallLatch(city);
     }
   }
 
   private updateWallRun(dt: number, city: City, wantsJump: boolean): void {
+    if (this.traversalDenied) {
+      this.detachWall(0.2);
+      return;
+    }
+
     this.wallTimer -= dt;
 
     const normal = city.probeWall(this.root.position, this.radius, this.height, 0.55);
@@ -329,6 +384,11 @@ export class Player {
   }
 
   private updateVerticalRun(dt: number, city: City, wantsJump: boolean): void {
+    if (this.traversalDenied) {
+      this.detachWall(0.2);
+      return;
+    }
+
     const normal = city.probeWall(this.root.position, this.radius, this.height, 0.7);
 
     if (!normal) {
@@ -410,6 +470,17 @@ export class Player {
     this.events.dashed = true;
   }
 
+  private tryPhase(): void {
+    if (this.phaseCooldown > 0 || this.charge < 22 || this.phaseTimer > 0) return;
+    this.charge -= 22;
+    this.phaseCooldown = 2.4;
+    this.phaseTimer = 0.55;
+    this.invulnerable = Math.max(this.invulnerable, 0.55);
+    this.events.phased = true;
+    // Detach from walls so phase is a clean cut through matter.
+    if (this.state === "wall" || this.state === "vertical") this.detachWall(0.15);
+  }
+
   private tryWallLatch(city: City): void {
     const normal = city.probeWall(this.root.position, this.radius, this.height, 0.5);
     if (!normal) return;
@@ -480,7 +551,19 @@ export class Player {
     }
 
     const delta = this.scratch.set(this.velocity.x * dt, 0, this.velocity.z * dt);
-    city.move(this.root.position, delta, this.radius, this.height, STEP_HEIGHT, this.move);
+    city.move(this.root.position, delta, this.radius, this.height, STEP_HEIGHT, this.move, this.phasing);
+
+    // Leaving phase inside a building is fatal to the fantasy — keep vibrating
+    // briefly while charge lasts, then yank to the nearest road.
+    if (!this.phasing && city.blocked(this.root.position, this.radius, this.height, STEP_HEIGHT)) {
+      if (this.charge >= 8) {
+        this.charge -= 8;
+        this.phaseTimer = 0.2;
+        this.invulnerable = Math.max(this.invulnerable, 0.2);
+      } else {
+        this.recover(city);
+      }
+    }
 
     const ground = this.move.groundY;
     if (this.root.position.y <= ground + 0.02) {
@@ -505,7 +588,8 @@ export class Player {
 
     // Running the river: fast enough and you stay on the surface.
     if (this.move.onWater && this.grounded) {
-      if (this.speed >= WATER_RUN_SPEED) {
+      const waterOk = this.speed >= WATER_RUN_SPEED && !this.traversalDenied;
+      if (waterOk) {
         this.sinkTimer = 0;
         this.events.waterSpray = true;
       } else {
@@ -538,6 +622,40 @@ export class Player {
     }
   }
 
+  /**
+   * Sustained hard orbit at pace → speed vortex.
+   * Accumulates signed yaw while fast; a full 2π within a short window fires it.
+   */
+  private trackVortex(dt: number): void {
+    if (this.vortexTimer > 0) return;
+
+    const speed = this.speed;
+    const turningHard = Math.abs(this.lastTurn) > 0.55;
+    if (speed > 55 && turningHard && this.grounded) {
+      this.orbitClock += dt;
+      this.yawAccum += this.lastTurn * (1 / 0.12) * dt;
+      // Drift the vortex centre toward the current position while circling.
+      const blend = damp(2.5, dt);
+      this.vortexCenter.x += (this.root.position.x - this.vortexCenter.x) * blend;
+      this.vortexCenter.y = this.root.position.y;
+      this.vortexCenter.z += (this.root.position.z - this.vortexCenter.z) * blend;
+
+      if (Math.abs(this.yawAccum) >= Math.PI * 2 && this.orbitClock < 2.8) {
+        this.vortexTimer = 1.6;
+        this.yawAccum = 0;
+        this.orbitClock = 0;
+        this.events.vortex = true;
+        this.charge = Math.min(100, this.charge + 10);
+      } else if (this.orbitClock > 2.8) {
+        this.yawAccum = 0;
+        this.orbitClock = 0;
+      }
+    } else {
+      this.yawAccum *= Math.exp(-3 * dt);
+      this.orbitClock = Math.max(0, this.orbitClock - dt * 0.5);
+    }
+  }
+
   private animate(dt: number): void {
     const speed = this.speed;
     this.model.pose({
@@ -551,7 +669,7 @@ export class Player {
       strike: this.strikeTimer,
       turn: this.lastTurn,
     });
-    this.model.setCharge(this.speedRatio, this.focusHeld);
+    this.model.setCharge(this.speedRatio, this.focusHeld || this.phasing);
 
     // Foot plants drive dust puffs and step audio.
     if (this.grounded && speed > 2) {
@@ -575,6 +693,23 @@ export class Player {
     this.events.struck = true;
   }
 
+  /** Damage / knockback scale for the current strike. Mass strikes hit much harder. */
+  strikePower(): { damage: number; knockback: number; mass: boolean } {
+    const mass = this.massStrikeReady;
+    if (mass) {
+      return {
+        damage: 3.2 + this.speedRatio * 3.6,
+        knockback: 48 + this.speedRatio * 36,
+        mass: true,
+      };
+    }
+    return {
+      damage: 1.4 + this.speedRatio * 1.8,
+      knockback: 22,
+      mass: false,
+    };
+  }
+
   canBolt(): boolean {
     return this.boltCooldown <= 0 && this.charge >= 15;
   }
@@ -594,6 +729,21 @@ export class Player {
     this.invulnerable = Math.max(this.invulnerable, 0.25);
   }
 
+  canPhase(): boolean {
+    return this.phaseCooldown <= 0 && this.charge >= 22 && !this.phasing;
+  }
+
+  canRemnant(): boolean {
+    return this.remnantCooldown <= 0 && this.charge >= 32;
+  }
+
+  useRemnant(): boolean {
+    if (!this.canRemnant()) return false;
+    this.charge -= 32;
+    this.remnantCooldown = 7.5;
+    return true;
+  }
+
   useFocus(dt: number): boolean {
     if (this.charge <= 0.25) return false;
     this.charge = Math.max(0, this.charge - 20 * dt);
@@ -607,7 +757,7 @@ export class Player {
   }
 
   damage(amount: number, source: Vector3): boolean {
-    if (this.invulnerable > 0) return false;
+    if (this.invulnerable > 0 || this.phasing) return false;
     this.health = Math.max(0, this.health - amount);
     this.secondsSinceDamage = 0;
     this.invulnerable = 0.55;
@@ -631,6 +781,8 @@ export class Player {
     this.state = "ground";
     this.climbSpeed = 0;
     this.sinkTimer = 0;
+    this.phaseTimer = 0;
+    this.vortexTimer = 0;
   }
 
   recover(city: City): void {
@@ -649,6 +801,8 @@ export class Player {
     e.waterSpray = false;
     e.sank = false;
     e.struck = false;
+    e.phased = false;
+    e.vortex = false;
   }
 
   private tickResources(dt: number): void {
@@ -656,9 +810,13 @@ export class Player {
     this.boltCooldown = Math.max(0, this.boltCooldown - dt);
     this.pulseCooldown = Math.max(0, this.pulseCooldown - dt);
     this.strikeCooldown = Math.max(0, this.strikeCooldown - dt);
+    this.phaseCooldown = Math.max(0, this.phaseCooldown - dt);
+    this.remnantCooldown = Math.max(0, this.remnantCooldown - dt);
     this.strikeTimer = Math.max(0, this.strikeTimer - dt);
     this.invulnerable = Math.max(0, this.invulnerable - dt);
     this.dashTimer = Math.max(0, this.dashTimer - dt);
+    this.phaseTimer = Math.max(0, this.phaseTimer - dt);
+    this.vortexTimer = Math.max(0, this.vortexTimer - dt);
     this.comboTimer = Math.max(0, this.comboTimer - dt);
     this.wallCooldown = Math.max(0, this.wallCooldown - dt);
     this.secondsSinceDamage += dt;

@@ -328,15 +328,27 @@ export class City {
     height: number,
     stepHeight: number,
     out: MoveResult,
+    /** When true, solids are ignored — the runner is vibrating through matter. */
+    phaseThrough = false,
   ): void {
+    out.hitWall = false;
+    out.wallX = 0;
+    out.wallZ = 0;
+
+    if (phaseThrough) {
+      position.x = clamp(position.x + delta.x, -this.extent + 4, this.extent - 4);
+      position.z = clamp(position.z + delta.z, -this.extent + 4, this.extent - 4);
+      out.progress = 1;
+      out.groundY = this.groundHeight(position.x, position.z, position.y + stepHeight);
+      out.grounded = position.y <= out.groundY + 0.06;
+      out.onWater = this.isWater(position.x, position.z) && out.groundY <= WATER_Y + 0.01;
+      return;
+    }
+
     const distance = Math.hypot(delta.x, delta.z);
     const steps = Math.max(1, Math.min(24, Math.ceil(distance / (radius * 0.8))));
     const stepX = delta.x / steps;
     const stepZ = delta.z / steps;
-
-    out.hitWall = false;
-    out.wallX = 0;
-    out.wallZ = 0;
 
     let moved = 0;
     for (let i = 0; i < steps; i += 1) {
@@ -369,6 +381,18 @@ export class City {
     out.groundY = this.groundHeight(position.x, position.z, position.y + stepHeight);
     out.grounded = position.y <= out.groundY + 0.06;
     out.onWater = this.isWater(position.x, position.z) && out.groundY <= WATER_Y + 0.01;
+  }
+
+  /** True when a body cylinder overlaps a solid — used to exit phase safely. */
+  blocked(position: Vector3, radius: number, height: number, stepHeight: number): boolean {
+    return this.grid.overlaps(
+      position.x,
+      position.z,
+      radius,
+      position.y,
+      position.y + height,
+      stepHeight,
+    );
   }
 
   /** Nearest climbable wall face, for latching into a wall run. */

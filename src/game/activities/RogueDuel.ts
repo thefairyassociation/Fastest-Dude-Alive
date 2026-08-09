@@ -85,9 +85,13 @@ export class RogueDuel implements Activity {
   }
 
   status(): ActivityStatus {
+    const tip =
+      this.definition.id === "anchor"
+        ? "dead-zones strip wall, water and top speed — phase or mass-strike out"
+        : "hit them during the recovery window";
     return {
       title: this.name,
-      detail: `${this.definition.name} · hit them during the recovery window`,
+      detail: `${this.definition.name} · ${tip}`,
       progress: undefined,
     };
   }
