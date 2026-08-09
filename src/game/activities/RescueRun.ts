@@ -19,6 +19,7 @@ import {
  */
 
 interface Target {
+  id: string;
   position: Vector3;
   bystander: Bystander | null;
   rescued: boolean;
@@ -62,7 +63,7 @@ export class RescueRun implements Activity {
         bystander.mood = "panic";
         bystander.setEnabled(true);
       }
-      this.targets.push({ position, bystander, rescued: false });
+      this.targets.push({ id: `${this.id}:person-${i + 1}`, position, bystander, rescued: false });
     }
 
     world.toast(`${this.name} — ${this.count} people, ${Math.round(this.seconds)} seconds`);
@@ -107,7 +108,13 @@ export class RescueRun implements Activity {
     const entries: MarkerEntry[] = [];
     for (const target of this.targets) {
       if (target.rescued) continue;
-      entries.push({ position: target.position, style: "rescue", radius: 12 });
+      entries.push({
+        id: target.id,
+        label: `Person ${this.targets.indexOf(target) + 1}`,
+        position: target.position,
+        style: "rescue",
+        radius: 12,
+      });
     }
     return entries;
   }
