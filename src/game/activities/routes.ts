@@ -56,7 +56,7 @@ export function buildRoutes(city: City): RouteDefinition[] {
     { position: roof(city, 178, 28), radius: 20 },
     { position: roof(city, 122, -122), radius: 20 },
     { position: roof(city, -28, -178), radius: 20 },
-    { position: roof(city, 150, 150, 90), radius: 26 },
+    // The Spire deck is already a rooftop; 90 m above it is unreachable.\n    { position: roof(city, 150, 150, 3), radius: 26 },
   ];
 
   const docks: RouteGate[] = [
