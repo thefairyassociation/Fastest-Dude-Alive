@@ -114,7 +114,20 @@ export class Campaign {
   }
 
   status(): ActivityStatus {
-    if (this.activity) return this.activity.status();
+    if (this.activity) {
+      const status = this.activity.status();
+      // Story routes have a chapter-level limit in addition to their activity
+      // timer. Keep that real deadline visible instead of hiding it behind
+      // the route's split time.
+      if (this.inline.timer > 0) {
+        return {
+          ...status,
+          detail: `${status.detail} · ${Math.ceil(this.inline.timer)}s limit`,
+          timer: this.inline.timer,
+        };
+      }
+      return status;
+    }
     return {
       title: this.title || this.chapter.title,
       detail: this.detail,
