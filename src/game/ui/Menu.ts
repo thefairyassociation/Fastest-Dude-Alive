@@ -234,7 +234,7 @@ export class Menu {
 
     element("btn-reset-profile").addEventListener("click", () => {
       // Destructive and irreversible, so it asks first.
-      if (!window.confirm("Reset every route time, mote and chapter? This cannot be undone.")) return;
+      if (!window.confirm("Reset every route time, mote, relay record and chapter? This cannot be undone.")) return;
       this.save.reset();
       quality.value = this.save.settings.quality;
       sensitivity.value = this.save.settings.lookSensitivity.toString();

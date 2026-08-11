@@ -152,7 +152,7 @@ export class Hud {
     this.focusBanner.classList.toggle("active", state.focusActive);
     this.focusTarget.textContent = state.focusPlan?.label ?? "No target read";
     this.focusRoute.textContent = state.focusPlan
-      ? `${Math.round(state.focusPlan.distance)} m · ${state.focusPlan.targets.length} point route · G cycle`
+      ? `${Math.round(state.focusPlan.distance)} m · ${state.focusPlan.targets.length} point route · G cycle · G clears`
       : "G cycles nearby signals";
     document.documentElement.style.setProperty("--focus-fx", state.focusActive ? "1" : "0");
 

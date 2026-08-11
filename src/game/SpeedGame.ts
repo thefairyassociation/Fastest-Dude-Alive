@@ -863,20 +863,32 @@ export class SpeedGame {
   private updateFocusPlanner(dt: number): void {
     const justActivated = this.focusActive && !this.focusWasActive;
     const cycle = this.input.consume("mark");
-    this.focusPlanClock -= dt;
 
     if (cycle && !this.focusActive) {
-      this.hud.toast("Hold Focus, then press G to cycle a Speed Sense target");
+      if (this.focusPlan) {
+        this.focusPlanner.clear();
+        this.focusPlan = null;
+        this.focusPlanClock = 0;
+        this.hud.toast("Speed Sense cleared");
+      } else {
+        this.hud.toast("Hold Focus, then press G to cycle a Speed Sense target");
+      }
+      this.focusWasActive = this.focusActive;
+      return;
     }
 
-    if (!this.focusActive && !this.focusPlan) {
+    // Keep a marked route frozen outside Focus so nearby-set churn cannot
+    // retarget or clear the player's choice mid-line.
+    if (!this.focusActive) {
       this.focusWasActive = false;
       return;
     }
 
+    this.focusPlanClock -= dt;
+
     if (justActivated || cycle || this.focusPlanClock <= 0) {
       const targets = this.focusTargets();
-      this.focusPlan = cycle && this.focusActive
+      this.focusPlan = cycle
         ? this.focusPlanner.cycle(targets, this.player.position)
         : this.focusPlanner.plan(targets, this.player.position);
       this.focusPlanClock = 0.2;
@@ -921,13 +933,20 @@ export class SpeedGame {
     // In open free roam, Speed Sense sweeps farther than the ordinary prompt
     // and lets the player choose what kind of run comes next.
     if (this.mode === "free" && !this.activity) {
-      const nearby = [...this.available]
-        .sort(
-          (a, b) =>
-            Vector3.DistanceSquared(a.anchor, this.player.position) -
-            Vector3.DistanceSquared(b.anchor, this.player.position),
-        )
-        .slice(0, 7);
+      const ordered = [...this.available].sort(
+        (a, b) =>
+          Vector3.DistanceSquared(a.anchor, this.player.position) -
+          Vector3.DistanceSquared(b.anchor, this.player.position),
+      );
+      const nearby = ordered.slice(0, 7);
+      const selectedId = this.focusPlanner.selected();
+      if (selectedId?.startsWith("activity:")) {
+        const pinnedId = selectedId.slice("activity:".length);
+        if (!nearby.some((candidate) => candidate.id === pinnedId)) {
+          const pinned = ordered.find((candidate) => candidate.id === pinnedId);
+          if (pinned) nearby.push(pinned);
+        }
+      }
       for (const candidate of nearby) {
         const id = `activity:${candidate.id}`;
         targets.set(id, {

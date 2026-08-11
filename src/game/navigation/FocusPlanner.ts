@@ -35,6 +35,11 @@ export class FocusPlanner {
     this.selectedId = null;
   }
 
+  /** Currently marked target, if any. */
+  selected(): string | null {
+    return this.selectedId;
+  }
+
   cycle(targets: readonly FocusTarget[], origin: PlanPoint): FocusPlan | null {
     if (targets.length === 0) {
       this.clear();

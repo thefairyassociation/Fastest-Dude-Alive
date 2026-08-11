@@ -50,7 +50,7 @@ The whole game is the handling model.
 | **Wall run** | Hit a wall at an angle instead and you stick to it, gravity cut to a fifth. Space kicks off. |
 | **Water running** | The river holds you above ~34 m/s. Drop under and it remembers you weigh something. |
 | Focus time | Hold F — threats, hazards and civilians slow on separate simulation layers while you and objective clocks stay honest; drains momentum |
-| Speed Sense | While focused, press G or middle click to cycle a target. The minimap and city map show a numbered traversal sequence. |
+| Speed Sense | While focused, press G or middle click to cycle a target. Outside Focus, G clears the mark. The minimap and city map show a numbered traversal sequence. |
 
 Turning gets heavier the faster you go, which is the entire handling model in one sentence.
 
@@ -67,7 +67,7 @@ Turning gets heavier the faster you go, which is the entire handling model in on
 | E | Arc bolt |
 | Q | Kinetic pulse |
 | F (hold) | Focus time |
-| G / middle click | Cycle and mark a Speed Sense target while focused |
+| G / middle click | Cycle and mark a Speed Sense target while focused; clear the mark outside Focus |
 | T | Start the nearest activity |
 | R | Recover at the nearest road |
 | M | City map |
