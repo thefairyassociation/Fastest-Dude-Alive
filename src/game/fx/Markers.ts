@@ -19,9 +19,20 @@ import { createBeamSprite } from "../world/Textures";
  * pool only ever grows to the largest simultaneous count.
  */
 
-export type MarkerStyle = "objective" | "checkpoint" | "rescue" | "collectible" | "threat";
+export type MarkerStyle =
+  | "objective"
+  | "checkpoint"
+  | "rescue"
+  | "collectible"
+  | "threat"
+  | "relay"
+  | "planned";
 
 export interface MarkerEntry {
+  /** Stable identity for Focus planning. */
+  id?: string;
+  /** Human-readable Speed Sense label. */
+  label?: string;
   position: Vector3;
   style: MarkerStyle;
   /** Radius of the ground ring in metres. */
@@ -34,6 +45,8 @@ const STYLE_COLORS: Record<MarkerStyle, string> = {
   rescue: "#6fd3a0",
   collectible: "#9fd4ff",
   threat: "#ff6a58",
+  relay: "#68e1df",
+  planned: "#fff08a",
 };
 
 interface MarkerNode {

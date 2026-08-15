@@ -8,7 +8,7 @@
  */
 
 const KEY = "fastest-dude-alive:profile";
-const VERSION = 2;
+const VERSION = 3;
 
 /**
  * Bounds for anything read back from storage. A profile is user-editable, so
@@ -37,6 +37,14 @@ export interface Settings {
   /** Trims camera shake, speed-line density and screen pulses. */
   reducedMotion: boolean;
   showSpeedInMph: boolean;
+  /** More time, lower relay speed gates and a shorter Focus hold. */
+  relayAssist: boolean;
+}
+
+export interface RelayRecord {
+  clears: number;
+  fastestClearSeconds: number;
+  bestReserveSeconds: number;
 }
 
 export interface CampaignSave {
@@ -58,6 +66,8 @@ export interface Profile {
   collected: string[];
   /** Rogue ids beaten at least once in free roam. */
   roguesBeaten: string[];
+  /** Durable records for Harmonic Relay emergencies. */
+  relayRecords: Record<string, RelayRecord>;
   totalDistanceMeters: number;
   topSpeedKph: number;
 }
@@ -69,11 +79,13 @@ export const DEFAULT_PROFILE: Profile = {
     lookSensitivity: 1,
     reducedMotion: false,
     showSpeedInMph: false,
+    relayAssist: false,
   },
   campaign: { unlocked: 1, completed: [], current: null },
   routeBests: {},
   collected: [],
   roguesBeaten: [],
+  relayRecords: {},
   totalDistanceMeters: 0,
   topSpeedKph: 0,
 };
@@ -110,6 +122,16 @@ export class Save {
 
   bestFor(id: string): number | null {
     return this.profile.routeBests[id] ?? null;
+  }
+
+  recordRelay(id: string, elapsed: number, reserve: number): void {
+    const previous = this.profile.relayRecords[id];
+    this.profile.relayRecords[id] = {
+      clears: Math.min(9999, (previous?.clears ?? 0) + 1),
+      fastestClearSeconds: Math.min(previous?.fastestClearSeconds ?? elapsed, elapsed),
+      bestReserveSeconds: Math.max(previous?.bestReserveSeconds ?? 0, reserve),
+    };
+    this.scheduleFlush();
   }
 
   collect(id: string): boolean {
@@ -202,6 +224,7 @@ function migrate(raw: unknown): Profile {
     }
     profile.settings.reducedMotion = s.reducedMotion === true;
     profile.settings.showSpeedInMph = s.showSpeedInMph === true;
+    profile.settings.relayAssist = s.relayAssist === true;
   }
 
   if (typeof source.campaign === "object" && source.campaign !== null) {
@@ -225,6 +248,24 @@ function migrate(raw: unknown): Profile {
 
   profile.collected = idList(source.collected);
   profile.roguesBeaten = idList(source.roguesBeaten);
+  if (typeof source.relayRecords === "object" && source.relayRecords !== null) {
+    let kept = 0;
+    for (const [id, value] of Object.entries(source.relayRecords)) {
+      if (kept >= MAX_IDS) break;
+      if (id.length > 64 || typeof value !== "object" || value === null) continue;
+      const record = value as Partial<RelayRecord>;
+      const clears = finiteBound(record.clears, 0, 9999);
+      const fastest = finiteBound(record.fastestClearSeconds, 0, 36000);
+      const reserve = finiteBound(record.bestReserveSeconds, 0, 36000);
+      if (clears === null || fastest === null || reserve === null) continue;
+      profile.relayRecords[id] = {
+        clears: Math.floor(clears),
+        fastestClearSeconds: fastest,
+        bestReserveSeconds: reserve,
+      };
+      kept += 1;
+    }
+  }
   if (typeof source.totalDistanceMeters === "number" && Number.isFinite(source.totalDistanceMeters)) {
     profile.totalDistanceMeters = source.totalDistanceMeters;
   }
@@ -234,4 +275,9 @@ function migrate(raw: unknown): Profile {
 
   profile.version = VERSION;
   return profile;
+}
+
+function finiteBound(value: unknown, minimum: number, maximum: number): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(maximum, Math.max(minimum, value));
 }

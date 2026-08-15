@@ -119,9 +119,14 @@ export class Menu {
     const profile = this.save.data;
     const km = Math.round(profile.totalDistanceMeters / 100) / 10;
     const chapters = profile.campaign.completed.length;
+    const relayClears = Object.values(profile.relayRecords).reduce(
+      (total, record) => total + record.clears,
+      0,
+    );
     this.menuStat.textContent =
       `${km.toFixed(1)} km run · ${profile.collected.length} motes · ` +
-      `${chapters}/${CHAPTERS.length} chapters · top ${Math.round(profile.topSpeedKph)} km/h`;
+      `${relayClears} relay clears · ${chapters}/${CHAPTERS.length} chapters · ` +
+      `top ${Math.round(profile.topSpeedKph)} km/h`;
   }
 
   private buildChapters(): void {
@@ -176,6 +181,7 @@ export class Menu {
     const sensitivityValue = element("set-sensitivity-value");
     const reduced = element("set-reduced-motion") as HTMLInputElement;
     const mph = element("set-mph") as HTMLInputElement;
+    const relayAssist = element("set-relay-assist") as HTMLInputElement;
 
     const settings = this.save.settings;
     quality.value = settings.quality;
@@ -183,6 +189,7 @@ export class Menu {
     sensitivityValue.textContent = `${settings.lookSensitivity.toFixed(2)}×`;
     reduced.checked = settings.reducedMotion;
     mph.checked = settings.showSpeedInMph;
+    relayAssist.checked = settings.relayAssist;
 
     quality.addEventListener("change", () => {
       const value = quality.value;
@@ -218,6 +225,13 @@ export class Menu {
       this.callbacks.onSettingsChanged();
     });
 
+    relayAssist.addEventListener("change", () => {
+      this.save.update((profile) => {
+        profile.settings.relayAssist = relayAssist.checked;
+      });
+      this.callbacks.onSettingsChanged();
+    });
+
     element("btn-reset-profile").addEventListener("click", () => {
       // Destructive and irreversible, so it asks first.
       if (!window.confirm("Reset every route time, mote and chapter? This cannot be undone.")) return;
@@ -226,6 +240,7 @@ export class Menu {
       sensitivity.value = this.save.settings.lookSensitivity.toString();
       reduced.checked = this.save.settings.reducedMotion;
       mph.checked = this.save.settings.showSpeedInMph;
+      relayAssist.checked = this.save.settings.relayAssist;
       this.refreshStats();
       this.callbacks.onSettingsChanged();
     });

@@ -5,11 +5,13 @@ import type { Player } from "../player/Player";
 import type { Rogue } from "../npc/Rogue";
 import type { City } from "../world/City";
 import { BLOCK_PITCH } from "../world/City";
+import type { FocusPlan } from "../navigation/FocusPlanner";
 
 export interface HudState {
   modeLabel: string;
   objective: ActivityStatus;
   focusActive: boolean;
+  focusPlan: FocusPlan | null;
   markers: MarkerEntry[];
   rogue: Rogue | null;
   prompt: { title: string; detail: string } | null;
@@ -44,6 +46,8 @@ export class Hud {
   private readonly objectiveProgress = element("objective-progress-fill");
   private readonly rendererBadge = element("renderer-badge");
   private readonly focusBanner = element("focus-banner");
+  private readonly focusTarget = element("focus-target");
+  private readonly focusRoute = element("focus-route");
   private readonly captureHint = element("capture-hint");
   private readonly toastElement = element("toast");
   private readonly traversal = element("traversal-state");
@@ -146,6 +150,10 @@ export class Hud {
     this.objectiveProgress.style.transform = `scaleX(${Math.max(0, Math.min(1, progress))})`;
 
     this.focusBanner.classList.toggle("active", state.focusActive);
+    this.focusTarget.textContent = state.focusPlan?.label ?? "No target read";
+    this.focusRoute.textContent = state.focusPlan
+      ? `${Math.round(state.focusPlan.distance)} m · ${state.focusPlan.targets.length} point route · G cycle`
+      : "G cycles nearby signals";
     document.documentElement.style.setProperty("--focus-fx", state.focusActive ? "1" : "0");
 
     const label = TRAVERSAL_LABEL[player.state] ?? "";
@@ -276,11 +284,25 @@ export class Hud {
     }
 
     // Objective markers: in-range dots, out-of-range edge chevrons.
+    if (state.focusPlan && state.focusPlan.targets.length > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(half, half);
+      for (const target of state.focusPlan.targets) {
+        ctx.lineTo(toX(target.position.x), toY(target.position.z));
+      }
+      ctx.strokeStyle = "rgba(104, 225, 223, 0.78)";
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([7, 6]);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     for (const marker of state.markers) {
       const dx = marker.position.x - px;
       const dz = marker.position.z - pz;
       const distance = Math.hypot(dx, dz);
-      const color = marker.style === "rescue" ? "#6fd3a0" : marker.style === "collectible" ? "#9fd4ff" : "#f2a33c";
+      const color = markerColor(marker.style);
       if (distance * scale < half - 16) {
         ctx.beginPath();
         ctx.arc(toX(marker.position.x), toY(marker.position.z), 6, 0, Math.PI * 2);
@@ -364,8 +386,38 @@ export class Hud {
       ctx.fillText(landmark.name, toX(landmark.position.x), toY(landmark.position.z) - 10);
     }
 
+    if (state.focusPlan && state.focusPlan.targets.length > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(toX(player.position.x), toY(player.position.z));
+      for (const target of state.focusPlan.targets) {
+        ctx.lineTo(toX(target.position.x), toY(target.position.z));
+      }
+      ctx.strokeStyle = "rgba(104, 225, 223, 0.82)";
+      ctx.lineWidth = 3;
+      ctx.setLineDash([10, 8]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = "800 12px Inter, sans-serif";
+      for (let index = 0; index < state.focusPlan.targets.length; index += 1) {
+        const target = state.focusPlan.targets[index];
+        if (!target) continue;
+        const x = toX(target.position.x);
+        const y = toY(target.position.z);
+        ctx.fillStyle = index === 0 ? "#fff08a" : "#68e1df";
+        ctx.beginPath();
+        ctx.arc(x, y, 9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "#101418";
+        ctx.fillText((index + 1).toString(), x, y + 0.5);
+      }
+      ctx.restore();
+    }
+
     for (const marker of state.markers) {
-      ctx.strokeStyle = "#f2a33c";
+      ctx.strokeStyle = markerColor(marker.style);
       ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.arc(toX(marker.position.x), toY(marker.position.z), 8, 0, Math.PI * 2);
@@ -401,6 +453,24 @@ function canvas(id: string): HTMLCanvasElement {
 
 function setReady(id: string, ready: boolean): void {
   document.getElementById(id)?.classList.toggle("ready", ready);
+}
+
+function markerColor(style: MarkerEntry["style"]): string {
+  switch (style) {
+    case "rescue":
+      return "#6fd3a0";
+    case "collectible":
+      return "#9fd4ff";
+    case "threat":
+      return "#ff6a58";
+    case "relay":
+      return "#68e1df";
+    case "planned":
+      return "#fff08a";
+    case "checkpoint":
+    case "objective":
+      return "#f2a33c";
+  }
 }
 
 function tier(speedKph: number): string {
