@@ -12,18 +12,21 @@ import {
 import { Input } from "./core/Input";
 import { clamp, damp, mulberry32, type Rng } from "./core/Rng";
 import { Save, type Quality } from "./core/Save";
+import { simulationTime } from "./core/SimulationTime";
 import { createBestEngine } from "./core/engine";
 import { City } from "./world/City";
 import { Player } from "./player/Player";
 import { Effects } from "./fx/Effects";
-import { Markers, type MarkerEntry } from "./fx/Markers";
+import { Markers, type MarkerEntry, type MarkerStyle } from "./fx/Markers";
 import { Rogue, rogueById } from "./npc/Rogue";
 import { Bystander, createBystanderMaterials } from "./npc/Bystander";
 import { Collectibles } from "./activities/Collectibles";
 import { RouteRun } from "./activities/RouteRun";
 import { RescueRun } from "./activities/RescueRun";
 import { RogueDuel } from "./activities/RogueDuel";
+import { HarmonicRelay } from "./activities/HarmonicRelay";
 import { buildRoutes } from "./activities/routes";
+import { buildRelays } from "./activities/relays";
 import type { Activity, ActivityStatus, ActivityWorld } from "./activities/Activity";
 import { Campaign } from "./story/Campaign";
 import type { Chapter } from "./story/script";
@@ -31,6 +34,11 @@ import { CHAPTERS } from "./story/script";
 import { Hud, type HudState } from "./ui/Hud";
 import { Dialogue } from "./ui/Dialogue";
 import { Menu } from "./ui/Menu";
+import {
+  FocusPlanner,
+  type FocusPlan,
+  type FocusTarget,
+} from "./navigation/FocusPlanner";
 
 type Mode = "menu" | "free" | "story";
 
@@ -79,6 +87,10 @@ export class SpeedGame {
   private cameraRoll = 0;
   private shake = 0;
   private focusActive = false;
+  private focusWasActive = false;
+  private readonly focusPlanner = new FocusPlanner();
+  private focusPlan: FocusPlan | null = null;
+  private focusPlanClock = 0;
   private saveClock = 0;
   private peakSpeed = 0;
   private paused = true;
@@ -223,7 +235,7 @@ export class SpeedGame {
         this.updateCamera(frameDt);
         this.effects.update(frameDt, this.player, this.focusActive);
         this.markers.update(frameDt, this.player.position);
-        this.city.sky.update(frameDt);
+        this.city.sky.update(simulationTime(frameDt, this.focusActive).ambient);
         this.city.updateStreaming(this.player.position);
         this.scene.imageProcessingConfiguration.exposure = this.city.sky.exposure;
         this.hud.update(frameDt, this.player, this.hudState());
@@ -258,6 +270,7 @@ export class SpeedGame {
       save: this.save,
       rng: this.rng,
       toast: (message: string) => this.hud.toast(message),
+      focusActive: () => this.focusActive,
       spawnRogue: (id: string, position: Vector3) => {
         const rogue = new Rogue(this.scene, rogueById(id), position);
         this.city.addShadowCaster(rogue.shadowCaster);
@@ -288,6 +301,7 @@ export class SpeedGame {
   private buildFreeRoamActivities(): Activity[] {
     const activities: Activity[] = [];
     for (const route of buildRoutes(this.city)) activities.push(new RouteRun(route));
+    for (const relay of buildRelays(this.city)) activities.push(new HarmonicRelay(relay));
 
     activities.push(
       new RescueRun(
@@ -402,6 +416,11 @@ export class SpeedGame {
     this.world.releaseBystanders();
     this.markers.clear();
     this.dialogue.hide();
+    this.focusActive = false;
+    this.focusWasActive = false;
+    this.focusPlanner.clear();
+    this.focusPlan = null;
+    this.focusPlanClock = 0;
     this.accumulator = 0;
   }
 
@@ -465,17 +484,19 @@ export class SpeedGame {
       this.handleCombat();
     }
 
-    const npcDt = this.focusActive ? dt * 0.16 : dt;
-    this.updateRogues(npcDt);
-    for (const bystander of this.bystanders) bystander.update(npcDt);
+    const time = simulationTime(dt, this.focusActive);
+    this.updateRogues(time.threat, time.hazard);
+    for (const bystander of this.bystanders) bystander.update(time.civilian);
 
     if (this.collectibles.update(dt, this.player.position, this.effects)) {
       this.hud.toast(`Resonance mote · ${this.collectibles.found}/${this.collectibles.total}`);
       this.player.charge = Math.min(100, this.player.charge + 8);
     }
 
-    if (this.mode === "story") this.updateStory(dt);
-    else this.updateFreeRoam(dt);
+    if (this.mode === "story") this.updateStory(time.objective);
+    else this.updateFreeRoam(time.objective);
+
+    this.updateFocusPlanner(dt);
 
     if (this.player.health <= 0) this.handleDown();
 
@@ -673,11 +694,11 @@ export class SpeedGame {
     }
   }
 
-  private updateRogues(dt: number): void {
+  private updateRogues(threatDt: number, hazardDt: number): void {
     const player = this.player;
     for (const rogue of this.rogues) {
       const groundY = this.city.groundHeight(rogue.position.x, rogue.position.z, rogue.position.y + 3);
-      const outcome = rogue.update(dt, player.position, groundY);
+      const outcome = rogue.update(threatDt, player.position, groundY);
 
       if (outcome.telegraph) this.effects.pulse(rogue.position, "danger", 5, 0.3);
       if (outcome.projectile) {
@@ -694,7 +715,7 @@ export class SpeedGame {
       // Dampening fields bleed momentum off anyone standing in them.
       for (const field of rogue.fields) {
         if (Vector3.DistanceSquared(field.position, player.position) > field.radius * field.radius) continue;
-        player.velocity.scaleInPlace(Math.exp(-3.4 * dt));
+        player.velocity.scaleInPlace(Math.exp(-3.4 * hazardDt));
       }
     }
   }
@@ -792,17 +813,158 @@ export class SpeedGame {
     }
   }
 
-  private currentMarkers(): MarkerEntry[] {
+  private baseMarkers(): MarkerEntry[] {
     if (this.campaign) return this.campaign.markers();
     if (this.activity) return this.activity.markers();
 
     const entries: MarkerEntry[] = [];
     const mote = this.collectibles.nearest(this.player.position, 220);
-    if (mote) entries.push({ position: mote, style: "collectible", radius: 5 });
+    if (mote) {
+      entries.push({
+        id: pointId("mote", mote),
+        label: "Resonance mote",
+        position: mote,
+        style: "collectible",
+        radius: 5,
+      });
+    }
     if (this.nearestActivity) {
-      entries.push({ position: this.nearestActivity.anchor, style: "objective", radius: 14 });
+      entries.push({
+        id: `activity:${this.nearestActivity.id}`,
+        label: this.nearestActivity.name,
+        position: this.nearestActivity.anchor,
+        style: "objective",
+        radius: 14,
+      });
     }
     return entries;
+  }
+
+  private currentMarkers(): MarkerEntry[] {
+    const base = this.baseMarkers();
+    const plan = this.focusPlan;
+    if (!plan || plan.targets.length === 0) return base;
+
+    const entries = new Map<string, MarkerEntry>();
+    for (const marker of base) entries.set(markerId(marker), marker);
+    const visibleTargets = this.focusActive ? plan.targets : plan.targets.slice(0, 1);
+    for (const target of visibleTargets) {
+      entries.set(target.id, {
+        id: target.id,
+        label: target.label,
+        position: target.position as Vector3,
+        style: target.id === plan.selectedId ? "planned" : target.style,
+        radius: target.id === plan.selectedId ? 16 : 10,
+      });
+    }
+    return [...entries.values()];
+  }
+
+  private updateFocusPlanner(dt: number): void {
+    const justActivated = this.focusActive && !this.focusWasActive;
+    const cycle = this.input.consume("mark");
+
+    if (cycle && !this.focusActive) {
+      if (this.focusPlan) {
+        this.focusPlanner.clear();
+        this.focusPlan = null;
+        this.focusPlanClock = 0;
+        this.hud.toast("Speed Sense cleared");
+      } else {
+        this.hud.toast("Hold Focus, then press G to cycle a Speed Sense target");
+      }
+      this.focusWasActive = this.focusActive;
+      return;
+    }
+
+    // Keep a marked route frozen outside Focus so nearby-set churn cannot
+    // retarget or clear the player's choice mid-line.
+    if (!this.focusActive) {
+      this.focusWasActive = false;
+      return;
+    }
+
+    this.focusPlanClock -= dt;
+
+    if (justActivated || cycle || this.focusPlanClock <= 0) {
+      const targets = this.focusTargets();
+      this.focusPlan = cycle
+        ? this.focusPlanner.cycle(targets, this.player.position)
+        : this.focusPlanner.plan(targets, this.player.position);
+      this.focusPlanClock = 0.2;
+
+      if (cycle && this.focusPlan) {
+        this.hud.toast(`Marked · ${this.focusPlan.label}`);
+      } else if (justActivated) {
+        this.hud.toast(
+          this.focusPlan
+            ? `Speed Sense · ${targets.length} ${targets.length === 1 ? "target" : "targets"} · G cycles`
+            : "Speed Sense · no signal in range",
+        );
+      }
+    }
+
+    this.focusWasActive = this.focusActive;
+  }
+
+  private focusTargets(): FocusTarget[] {
+    const targets = new Map<string, FocusTarget>();
+    for (const marker of this.baseMarkers()) {
+      const id = markerId(marker);
+      targets.set(id, {
+        id,
+        label: marker.label ?? markerLabel(marker.style),
+        position: marker.position,
+        style: marker.style,
+      });
+    }
+
+    for (const rogue of this.rogues) {
+      if (!rogue.alive) continue;
+      const id = `rogue:${rogue.definition.id}`;
+      targets.set(id, {
+        id,
+        label: rogue.definition.codename,
+        position: rogue.position,
+        style: "threat",
+      });
+    }
+
+    // In open free roam, Speed Sense sweeps farther than the ordinary prompt
+    // and lets the player choose what kind of run comes next.
+    if (this.mode === "free" && !this.activity) {
+      const ordered = [...this.available].sort(
+        (a, b) =>
+          Vector3.DistanceSquared(a.anchor, this.player.position) -
+          Vector3.DistanceSquared(b.anchor, this.player.position),
+      );
+      const nearby = ordered.slice(0, 7);
+      const selectedId = this.focusPlanner.selected();
+      if (selectedId?.startsWith("activity:")) {
+        const pinnedId = selectedId.slice("activity:".length);
+        if (!nearby.some((candidate) => candidate.id === pinnedId)) {
+          const pinned = ordered.find((candidate) => candidate.id === pinnedId);
+          if (pinned) nearby.push(pinned);
+        }
+      }
+      for (const candidate of nearby) {
+        const id = `activity:${candidate.id}`;
+        targets.set(id, {
+          id,
+          label: candidate.name,
+          position: candidate.anchor,
+          style: "objective",
+        });
+      }
+
+      const mote = this.collectibles.nearest(this.player.position, 450);
+      if (mote) {
+        const id = pointId("mote", mote);
+        targets.set(id, { id, label: "Resonance mote", position: mote, style: "collectible" });
+      }
+    }
+
+    return [...targets.values()];
   }
 
   private hudState(): HudState {
@@ -812,6 +974,7 @@ export class SpeedGame {
       modeLabel: this.mode === "story" ? `Story · ${this.chapter?.title ?? ""}` : "Free roam",
       objective,
       focusActive: this.focusActive,
+      focusPlan: this.focusPlan,
       markers: this.currentMarkers(),
       rogue,
       prompt:
@@ -857,5 +1020,32 @@ export class SpeedGame {
       profile.topSpeedKph = Math.max(profile.topSpeedKph, top);
     });
     this.player.distance = 0;
+  }
+}
+
+function markerId(marker: MarkerEntry): string {
+  return marker.id ?? pointId(marker.style, marker.position);
+}
+
+function pointId(prefix: string, point: { x: number; y: number; z: number }): string {
+  return `${prefix}:${Math.round(point.x)}:${Math.round(point.y)}:${Math.round(point.z)}`;
+}
+
+function markerLabel(style: MarkerStyle): string {
+  switch (style) {
+    case "checkpoint":
+      return "Checkpoint";
+    case "rescue":
+      return "Rescue target";
+    case "collectible":
+      return "Resonance mote";
+    case "threat":
+      return "Threat";
+    case "relay":
+      return "Unstable relay";
+    case "planned":
+      return "Marked target";
+    case "objective":
+      return "Objective";
   }
 }

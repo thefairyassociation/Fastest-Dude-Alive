@@ -23,6 +23,8 @@ export interface ActivityWorld {
   save: Save;
   rng: Rng;
   toast(message: string): void;
+  /** True while the player's Focus domain is active this simulation step. */
+  focusActive(): boolean;
   /** Spawns a rogue for an encounter; the world owns its lifetime. */
   spawnRogue(id: string, position: Vector3): Rogue;
   clearRogues(): void;

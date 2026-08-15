@@ -945,19 +945,39 @@ input {
   transition: opacity 140ms;
 }
 
-.focus-banner span {
+.focus-readout {
   position: absolute;
   top: 128px;
   left: 50%;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
   transform: translateX(-50%);
-  padding: 5px 14px;
+  min-width: 250px;
+  padding: 8px 16px 9px;
+  color: #cfe1ff;
+  background: rgba(10, 14, 22, 0.66);
+  border: 1px solid rgba(146, 190, 255, 0.22);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+}
+
+.focus-readout span {
   font: 700 11px/1.2 Inter, sans-serif;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: #cfe1ff;
-  background: rgba(10, 14, 22, 0.55);
-  border-radius: 999px;
-  backdrop-filter: blur(10px);
+}
+
+.focus-readout strong {
+  font: 800 18px/1.1 "Barlow Condensed", sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #fff08a;
+}
+
+.focus-readout small {
+  font: 600 10px/1.2 Inter, sans-serif;
+  color: rgba(207, 225, 255, 0.72);
 }
 
 .focus-banner.active {
@@ -1228,6 +1248,7 @@ input {
   .dialogue p { font-size: 15px; }
   .district-banner { top: 72px; }
   .rogue-bar { top: 72px; width: calc(100vw - 48px); }
+  .focus-readout { top: 112px; }
 }
 
 @media (max-width: 560px) {

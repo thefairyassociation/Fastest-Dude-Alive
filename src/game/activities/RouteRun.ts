@@ -118,11 +118,25 @@ export class RouteRun implements Activity {
     const gate = this.route.gates[this.index];
     if (!gate) return [];
     const entries: MarkerEntry[] = [
-      { position: gate.position, style: "checkpoint", radius: gate.radius ?? 16 },
+      {
+        id: `${this.id}:gate-${this.index + 1}`,
+        label: `${this.name} gate ${this.index + 1}`,
+        position: gate.position,
+        style: "checkpoint",
+        radius: gate.radius ?? 16,
+      },
     ];
     // Show the next gate faintly so the line ahead is readable at speed.
     const next = this.route.gates[this.index + 1];
-    if (next) entries.push({ position: next.position, style: "objective", radius: 10 });
+    if (next) {
+      entries.push({
+        id: `${this.id}:gate-${this.index + 2}`,
+        label: `${this.name} gate ${this.index + 2}`,
+        position: next.position,
+        style: "objective",
+        radius: 10,
+      });
+    }
     return entries;
   }
 

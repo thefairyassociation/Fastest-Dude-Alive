@@ -113,8 +113,13 @@
                 <span>Show speed in mph</span>
               </label>
 
+              <label class="setting setting-row">
+                <input id="set-relay-assist" type="checkbox" />
+                <span>Relay assist — 25% more time, gentler speed gates and shorter tuning holds</span>
+              </label>
+
               <button class="danger-button" id="btn-reset-profile" type="button">
-                Reset profile (times, motes, campaign progress)
+                Reset profile (times, motes, relays, campaign progress)
               </button>
             </div>
           </div>
@@ -137,6 +142,7 @@
                 <tr><th>E</th><td>Arc bolt</td></tr>
                 <tr><th>Q</th><td>Kinetic pulse</td></tr>
                 <tr><th>F (hold)</th><td>Focus time</td></tr>
+                <tr><th>G / middle click</th><td>In Focus, cycle and mark a Speed Sense target · outside Focus, clear the mark</td></tr>
                 <tr><th>T</th><td>Start the nearest activity</td></tr>
                 <tr><th>R</th><td>Recover at the nearest road</td></tr>
                 <tr><th>M</th><td>Toggle the city map</td></tr>
@@ -205,7 +211,13 @@
 
         <div class="reticle" aria-hidden="true"></div>
         <div id="toast" class="toast" aria-live="polite"></div>
-        <div id="focus-banner" class="focus-banner"><span>Focus time</span></div>
+        <div id="focus-banner" class="focus-banner">
+          <div class="focus-readout">
+            <span>Speed Sense</span>
+            <strong id="focus-target">No target read</strong>
+            <small id="focus-route">G cycles nearby signals</small>
+          </div>
+        </div>
 
         <div id="prompt" class="prompt is-hidden">
           <kbd>T</kbd><strong id="prompt-title"></strong><span id="prompt-detail"></span>
