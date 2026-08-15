@@ -16,6 +16,9 @@ import {
  * the story's business. Mechanically: people are scattered across a few
  * blocks with a clock running, and every one you reach adds time. It is the
  * clearest expression of the fantasy that does not involve hitting anybody.
+ *
+ * A speed vortex can yank nearby targets inward; a remnant echo counts as a
+ * second body for the tag.
  */
 
 interface Target {
@@ -72,9 +75,32 @@ export class RescueRun implements Activity {
     this.elapsed += dt;
     this.timeLeft -= dt;
 
+    const player = world.player;
+    const remnant = world.remnantPosition();
+    const vortex = player.vortexActive;
+    const vortexCenter = player.vortexPullCenter;
+
     for (const target of this.targets) {
       if (target.rescued) continue;
-      if (Vector3.DistanceSquared(world.player.position, target.position) > 12 * 12) continue;
+
+      if (vortex) {
+        const away = target.position.subtract(vortexCenter);
+        const distance = away.length();
+        if (distance < 48 && distance > 0.01) {
+          const pull = Math.min(1, (48 - distance) / 48) * 38 * dt;
+          target.position.x -= (away.x / distance) * pull;
+          target.position.z -= (away.z / distance) * pull;
+          if (target.bystander) {
+            target.bystander.root.position.x = target.position.x;
+            target.bystander.root.position.z = target.position.z;
+          }
+        }
+      }
+
+      const nearPlayer = Vector3.DistanceSquared(player.position, target.position) <= 12 * 12;
+      const nearRemnant =
+        remnant !== null && Vector3.DistanceSquared(remnant, target.position) <= 14 * 14;
+      if (!nearPlayer && !nearRemnant) continue;
 
       target.rescued = true;
       this.saved += 1;
@@ -86,7 +112,8 @@ export class RescueRun implements Activity {
       if (target.bystander) {
         target.bystander.mood = "cheer";
       }
-      world.toast(`${this.saved}/${this.count} clear · +6s`);
+      const how = nearRemnant && !nearPlayer ? " (echo)" : vortex && nearPlayer ? " (vortex)" : "";
+      world.toast(`${this.saved}/${this.count} clear${how} · +6s`);
     }
 
     if (this.saved >= this.count) return "complete";

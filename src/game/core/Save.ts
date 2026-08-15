@@ -8,7 +8,9 @@
  */
 
 const KEY = "fastest-dude-alive:profile";
-const VERSION = 2;
+const VERSION = 3;
+/** Max XYZ triplets stored for a route ghost (keeps localStorage lean). */
+const MAX_GHOST_POINTS = 96;
 
 /**
  * Bounds for anything read back from storage. A profile is user-editable, so
@@ -54,6 +56,11 @@ export interface Profile {
   campaign: CampaignSave;
   /** Best time in seconds per free-roam route id. */
   routeBests: Record<string, number>;
+  /**
+   * Compact ghost path for each personal best: flat `[x,y,z, …]` triplets.
+   * Replayed locally against your own times — no network leaderboards yet.
+   */
+  routeGhosts: Record<string, number[]>;
   /** Collectible ids the player has picked up. */
   collected: string[];
   /** Rogue ids beaten at least once in free roam. */
@@ -72,6 +79,7 @@ export const DEFAULT_PROFILE: Profile = {
   },
   campaign: { unlocked: 1, completed: [], current: null },
   routeBests: {},
+  routeGhosts: {},
   collected: [],
   roguesBeaten: [],
   totalDistanceMeters: 0,
@@ -100,16 +108,24 @@ export class Save {
     this.scheduleFlush();
   }
 
-  recordRoute(id: string, seconds: number): boolean {
+  recordRoute(id: string, seconds: number, ghostPath?: number[]): boolean {
     const previous = this.profile.routeBests[id];
     if (previous !== undefined && previous <= seconds) return false;
     this.profile.routeBests[id] = seconds;
+    if (ghostPath && ghostPath.length >= 6) {
+      this.profile.routeGhosts[id] = sanitizeGhost(ghostPath);
+    }
     this.scheduleFlush();
     return true;
   }
 
   bestFor(id: string): number | null {
     return this.profile.routeBests[id] ?? null;
+  }
+
+  ghostFor(id: string): number[] | null {
+    const path = this.profile.routeGhosts[id];
+    return path && path.length >= 6 ? path : null;
   }
 
   collect(id: string): boolean {
@@ -223,6 +239,18 @@ function migrate(raw: unknown): Profile {
     }
   }
 
+  if (typeof source.routeGhosts === "object" && source.routeGhosts !== null) {
+    let kept = 0;
+    for (const [id, value] of Object.entries(source.routeGhosts)) {
+      if (kept >= MAX_IDS) break;
+      if (!Array.isArray(value)) continue;
+      const cleaned = sanitizeGhost(value);
+      if (cleaned.length < 6) continue;
+      profile.routeGhosts[id] = cleaned;
+      kept += 1;
+    }
+  }
+
   profile.collected = idList(source.collected);
   profile.roguesBeaten = idList(source.roguesBeaten);
   if (typeof source.totalDistanceMeters === "number" && Number.isFinite(source.totalDistanceMeters)) {
@@ -234,4 +262,16 @@ function migrate(raw: unknown): Profile {
 
   profile.version = VERSION;
   return profile;
+}
+
+function sanitizeGhost(raw: unknown[]): number[] {
+  const out: number[] = [];
+  for (const value of raw) {
+    if (typeof value !== "number" || !Number.isFinite(value)) continue;
+    out.push(value);
+    if (out.length >= MAX_GHOST_POINTS * 3) break;
+  }
+  // Trim to a whole number of points.
+  const trim = out.length - (out.length % 3);
+  return out.slice(0, trim);
 }

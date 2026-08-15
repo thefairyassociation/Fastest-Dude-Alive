@@ -117,6 +117,20 @@ export const ROGUES: RogueDefinition[] = [
     blurb: "Moves in negative resonance. Everything about him arrives before he does.",
     taunt: "You have had this speed for a year. I have had it far longer.",
   },
+  {
+    id: "anchor",
+    name: "Ivo Marrow",
+    codename: "Anchor",
+    archetype: "zoner",
+    health: 38,
+    speed: 18,
+    damage: 9,
+    suit: "#3a3228",
+    accent: "#c4a574",
+    blurb:
+      "Does not chase. Plants dead-zones that kill wall runs, water runs and top speed — a boss that rewrites the map instead of growing a health bar.",
+    taunt: "Keep the walls. Keep the river. You will not need either.",
+  },
 ];
 
 export function rogueById(id: string): RogueDefinition {
@@ -157,8 +171,17 @@ export class Rogue {
    * chapter nine is about lasting ninety seconds, not landing a hit.
    */
   phantom = false;
-  /** Slow field the zoner archetype leaves behind; drains player speed. */
-  readonly fields: Array<{ position: Vector3; radius: number; life: number }> = [];
+  /**
+   * Slow / denial fields the zoner archetype leaves behind.
+   * Anchor's fields also strip wall, vertical and water running.
+   */
+  readonly fields: Array<{
+    position: Vector3;
+    radius: number;
+    life: number;
+    denyTraversal?: boolean;
+    speedCap?: number;
+  }> = [];
 
   private phase: Phase = "approach";
   private phaseTimer = 0;
@@ -349,7 +372,14 @@ export class Rogue {
             this.blastPending = true;
             out.projectile = this.landing;
             if (this.definition.archetype === "zoner") {
-              this.fields.push({ position: playerPosition.clone(), radius: 16, life: 6 });
+              const isAnchor = this.definition.id === "anchor";
+              this.fields.push({
+                position: playerPosition.clone(),
+                radius: isAnchor ? 22 : 16,
+                life: isAnchor ? 9 : 6,
+                denyTraversal: isAnchor,
+                speedCap: isAnchor ? 58 : undefined,
+              });
             }
           }
         }

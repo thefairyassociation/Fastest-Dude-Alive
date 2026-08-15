@@ -18,6 +18,8 @@ export type Action =
   | "bolt"
   | "pulse"
   | "focus"
+  | "phase"
+  | "remnant"
   | "interact"
   | "activity"
   | "recover"
@@ -37,6 +39,8 @@ const DEFAULT_BINDINGS: Record<Action, string[]> = {
   bolt: ["KeyE"],
   pulse: ["KeyQ"],
   focus: ["KeyF", "Mouse2"],
+  phase: ["KeyV"],
+  remnant: ["KeyG"],
   interact: ["KeyE"],
   activity: ["KeyT"],
   recover: ["KeyR"],
@@ -47,7 +51,7 @@ const DEFAULT_BINDINGS: Record<Action, string[]> = {
 
 /** Codes we swallow so the page never scrolls or scrubs under the game. */
 const BLOCKED = new Set([
-  "KeyW", "KeyA", "KeyS", "KeyD", "KeyE", "KeyF", "KeyQ", "KeyR", "KeyT", "KeyC", "KeyM",
+  "KeyW", "KeyA", "KeyS", "KeyD", "KeyE", "KeyF", "KeyQ", "KeyR", "KeyT", "KeyC", "KeyM", "KeyV", "KeyG",
   "ShiftLeft", "ShiftRight", "ControlLeft", "Space",
   "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
 ]);
@@ -281,6 +285,8 @@ const GAMEPAD_BUTTONS: Partial<Record<Action, number>> = {
   bolt: 3,
   pulse: 5,
   focus: 4,
+  phase: 6,
+  remnant: 7,
   sprint: 10,
   interact: 2,
   activity: 8,

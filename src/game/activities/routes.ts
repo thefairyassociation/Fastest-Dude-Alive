@@ -67,6 +67,16 @@ export function buildRoutes(city: City): RouteDefinition[] {
     { position: road(city, 1200, 900), minSpeed: 55 },
   ];
 
+  // Slipstream chain: tight gates that punish braking — hold the wake.
+  const wake: RouteGate[] = [
+    { position: road(city, -600, 75), minSpeed: 50, slipstream: true },
+    { position: road(city, -300, 300), minSpeed: 70, slipstream: true, radius: 18 },
+    { position: road(city, 75, 450), minSpeed: 90, slipstream: true, radius: 18 },
+    { position: road(city, 450, 300), minSpeed: 110, slipstream: true, radius: 20 },
+    { position: road(city, 750, 75), minSpeed: 120, slipstream: true, radius: 20 },
+    { position: road(city, 900, -300), minSpeed: 100, slipstream: true },
+  ];
+
   return [
     {
       id: "meridian-loop",
@@ -95,6 +105,13 @@ export function buildRoutes(city: City): RouteDefinition[] {
       summary: "Five drops across the docks, each one faster than the last.",
       gates: docks,
       par: 44,
+    },
+    {
+      id: "wake-chain",
+      name: "Wake Chain",
+      summary: "Hold an unbroken slipstream through Midtown. Brake and the gate ignores you.",
+      gates: wake,
+      par: 38,
     },
   ];
 }

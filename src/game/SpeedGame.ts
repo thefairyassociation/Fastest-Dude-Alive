@@ -15,12 +15,14 @@ import { Save, type Quality } from "./core/Save";
 import { createBestEngine } from "./core/engine";
 import { City } from "./world/City";
 import { Player } from "./player/Player";
+import { Remnant } from "./player/Remnant";
 import { Effects } from "./fx/Effects";
 import { Markers, type MarkerEntry } from "./fx/Markers";
 import { Rogue, rogueById } from "./npc/Rogue";
 import { Bystander, createBystanderMaterials } from "./npc/Bystander";
 import { Collectibles } from "./activities/Collectibles";
 import { RouteRun } from "./activities/RouteRun";
+import { RouteGhost } from "./activities/RouteGhost";
 import { RescueRun } from "./activities/RescueRun";
 import { RogueDuel } from "./activities/RogueDuel";
 import { buildRoutes } from "./activities/routes";
@@ -58,6 +60,8 @@ export class SpeedGame {
   private effects!: Effects;
   private markers!: Markers;
   private collectibles!: Collectibles;
+  private remnant!: Remnant;
+  private routeGhost!: RouteGhost;
   private hud!: Hud;
   private dialogue!: Dialogue;
   private menu!: Menu;
@@ -122,6 +126,8 @@ export class SpeedGame {
     this.effects.setReducedMotion(this.save.settings.reducedMotion);
     this.markers = new Markers(this.scene);
     this.collectibles = new Collectibles(this.scene, this.city, this.rng, this.save);
+    this.remnant = new Remnant(this.scene);
+    this.routeGhost = new RouteGhost(this.scene);
 
     const bystanderMaterials = createBystanderMaterials(this.scene);
     for (let i = 0; i < BYSTANDER_POOL; i += 1) {
@@ -257,6 +263,7 @@ export class SpeedGame {
       effects: this.effects,
       save: this.save,
       rng: this.rng,
+      routeGhost: this.routeGhost,
       toast: (message: string) => this.hud.toast(message),
       spawnRogue: (id: string, position: Vector3) => {
         const rogue = new Rogue(this.scene, rogueById(id), position);
@@ -282,6 +289,7 @@ export class SpeedGame {
         }
         this.bystandersInUse = 0;
       },
+      remnantPosition: () => (this.remnant.alive ? this.remnant.position : null),
     };
   }
 
@@ -316,6 +324,7 @@ export class SpeedGame {
       ["coldsnap", "ridgeline-transit"],
       ["ricochet", "kestrel-bridge"],
       ["hollow", "corbin-green"],
+      ["anchor", "halcyon-labs"],
     ];
     for (const [rogue, landmark] of duelSpots) {
       activities.push(new RogueDuel(rogue, this.city.landmark(landmark).position.clone()));
@@ -462,9 +471,11 @@ export class SpeedGame {
       this.focusActive = this.input.down("focus") && this.player.useFocus(dt);
       this.player.focusHeld = this.focusActive;
       this.handlePlayerEvents(events);
+      this.handleRemnantInput();
       this.handleCombat();
     }
 
+    this.remnant.update(dt);
     const npcDt = this.focusActive ? dt * 0.16 : dt;
     this.updateRogues(npcDt);
     for (const bystander of this.bystanders) bystander.update(npcDt);
@@ -593,10 +604,47 @@ export class SpeedGame {
       this.effects.pulse(position, "warm", 9, 0.32);
       this.shake = Math.max(this.shake, 0.5);
     }
+    if (events.phased) {
+      this.effects.pulse(position, "cool", 12, 0.4);
+      this.effects.burst(position, 18, "cool");
+      this.hud.flashAbility("ability-phase");
+      this.hud.toast("Phase");
+    }
+    if (events.vortex) {
+      this.effects.pulse(this.player.vortexPullCenter, "cool", 40, 0.7);
+      this.effects.pulse(this.player.vortexPullCenter, "pale", 28, 0.55);
+      this.shake = Math.max(this.shake, 0.55);
+      this.hud.toast("Speed vortex");
+    }
+    if (this.player.vortexActive && Math.random() < 0.08) {
+      this.effects.pulse(this.player.vortexPullCenter, "cool", 22 + Math.random() * 18, 0.35);
+    }
+    if (this.player.phasing && Math.random() < 0.12) {
+      this.effects.burst(position, 3, "cool");
+    }
     if (events.footstep && this.player.speed > 60) this.effects.burst(position, 4, "pale");
     if (events.waterSpray) this.effects.burst(position, 6, "cool");
     if (events.sank) this.hud.toast("Too slow across the river");
     if (events.struck) this.hud.flashAbility("ability-dash");
+  }
+
+  private handleRemnantInput(): void {
+    if (!this.input.consume("remnant")) return;
+    if (!this.player.useRemnant()) {
+      this.hud.toast(this.player.charge < 32 ? "Need more momentum for an echo" : "Echo cooling down");
+      return;
+    }
+    const samples = this.player.pathRecorder.snapshot();
+    if (!this.remnant.spawn(samples)) {
+      // Refund if the trail was too short to play back.
+      this.player.charge = Math.min(100, this.player.charge + 32);
+      this.player.remnantCooldown = 0;
+      this.hud.toast("Need a longer trail for an echo");
+      return;
+    }
+    this.effects.pulse(this.player.position, "cool", 14, 0.4);
+    this.hud.flashAbility("ability-remnant");
+    this.hud.toast("Remnant echo");
   }
 
   /* ---------------- combat ---------------- */
@@ -606,12 +654,12 @@ export class SpeedGame {
     const position = player.position;
 
     // Body checks: at pace, contact is the attack.
-    if (player.speed > 85 || player.dashing) {
+    if (player.speed > 85 || player.dashing || player.phasing) {
       for (const rogue of this.rogues) {
         if (!rogue.alive) continue;
         if (Vector3.DistanceSquared(rogue.position, position) > 5 * 5) continue;
         const accepted = rogue.vulnerable;
-        const power = 1.5 + player.speedRatio * 2.5;
+        const power = 1.5 + player.speedRatio * 2.5 + (player.phasing ? 1.2 : 0);
         const heading = player.velocity.normalizeToNew();
         if (rogue.hit(power, heading.x * 30, heading.z * 30)) this.onRogueDefeated(rogue);
         else this.effects.pulse(rogue.position, "warm", 6);
@@ -619,17 +667,38 @@ export class SpeedGame {
       }
     }
 
+    // Remnant body-checks count as light hits — the echo is you, briefly.
+    if (this.remnant.alive) {
+      for (const rogue of this.rogues) {
+        if (!rogue.alive) continue;
+        if (Vector3.DistanceSquared(rogue.position, this.remnant.position) > 4.5 * 4.5) continue;
+        const accepted = rogue.vulnerable;
+        if (rogue.hit(1.6, 0, 0)) this.onRogueDefeated(rogue);
+        else this.effects.pulse(rogue.position, "cool", 5);
+        if (accepted) player.registerHit(0.8);
+      }
+    }
+
     if (this.input.consume("strike") && player.canStrike()) {
       player.useStrike();
-      const target = this.findTarget(14, -0.3);
+      const power = player.strikePower();
+      const reach = power.mass ? 18 : 14;
+      const target = this.findTarget(reach, -0.3);
       if (target) {
         const accepted = target.vulnerable;
-        const damage = 1.4 + player.speedRatio * 1.8;
         const heading = this.headingVector();
-        if (target.hit(damage, heading.x * 22, heading.z * 22)) this.onRogueDefeated(target);
-        else this.effects.pulse(target.position, "warm", 4);
-        this.effects.burst(target.position, 16, "warm");
-        if (accepted) player.registerHit();
+        if (target.hit(power.damage, heading.x * power.knockback, heading.z * power.knockback)) {
+          this.onRogueDefeated(target);
+        } else {
+          this.effects.pulse(target.position, power.mass ? "pale" : "warm", power.mass ? 10 : 4);
+        }
+        this.effects.burst(target.position, power.mass ? 32 : 16, power.mass ? "pale" : "warm");
+        if (power.mass) {
+          this.effects.pulse(position, "warm", 16, 0.45);
+          this.shake = Math.max(this.shake, 0.85);
+          this.hud.toast("Mass strike");
+        }
+        if (accepted) player.registerHit(power.mass ? 2.5 : 1);
       } else {
         this.effects.pulse(position, "pale", 2, 0.25);
       }
@@ -675,9 +744,19 @@ export class SpeedGame {
 
   private updateRogues(dt: number): void {
     const player = this.player;
+    player.traversalDenied = false;
+    player.speedCap = null;
+
     for (const rogue of this.rogues) {
       const groundY = this.city.groundHeight(rogue.position.x, rogue.position.z, rogue.position.y + 3);
-      const outcome = rogue.update(dt, player.position, groundY);
+      // Remnant echoes bait AI when they are the closer body.
+      let chase = player.position;
+      if (this.remnant.alive) {
+        const toPlayer = Vector3.DistanceSquared(rogue.position, player.position);
+        const toEcho = Vector3.DistanceSquared(rogue.position, this.remnant.position);
+        if (toEcho < toPlayer) chase = this.remnant.position;
+      }
+      const outcome = rogue.update(dt, chase, groundY);
 
       if (outcome.telegraph) this.effects.pulse(rogue.position, "danger", 5, 0.3);
       if (outcome.projectile) {
@@ -691,10 +770,29 @@ export class SpeedGame {
       }
       if (outcome.defeated) this.onRogueDefeated(rogue);
 
-      // Dampening fields bleed momentum off anyone standing in them.
+      // Dampening / denial fields: Coldsnap slows, Anchor rewrites traversal.
       for (const field of rogue.fields) {
-        if (Vector3.DistanceSquared(field.position, player.position) > field.radius * field.radius) continue;
+        if (Vector3.DistanceSquared(field.position, player.position) > field.radius * field.radius) {
+          continue;
+        }
         player.velocity.scaleInPlace(Math.exp(-3.4 * dt));
+        if (field.denyTraversal) player.traversalDenied = true;
+        if (field.speedCap !== undefined) {
+          player.speedCap =
+            player.speedCap === null ? field.speedCap : Math.min(player.speedCap, field.speedCap);
+        }
+      }
+
+      // A live vortex tugs light-footed rogues toward its centre.
+      if (player.vortexActive) {
+        const center = player.vortexPullCenter;
+        const away = rogue.position.subtract(center);
+        const distance = away.length();
+        if (distance < 36 && distance > 0.01) {
+          const pull = ((36 - distance) / 36) * 22 * dt;
+          rogue.position.x -= (away.x / distance) * pull;
+          rogue.position.z -= (away.z / distance) * pull;
+        }
       }
     }
   }
@@ -793,15 +891,24 @@ export class SpeedGame {
   }
 
   private currentMarkers(): MarkerEntry[] {
-    if (this.campaign) return this.campaign.markers();
-    if (this.activity) return this.activity.markers();
-
     const entries: MarkerEntry[] = [];
-    const mote = this.collectibles.nearest(this.player.position, 220);
-    if (mote) entries.push({ position: mote, style: "collectible", radius: 5 });
-    if (this.nearestActivity) {
-      entries.push({ position: this.nearestActivity.anchor, style: "objective", radius: 14 });
+
+    if (this.campaign) entries.push(...this.campaign.markers());
+    else if (this.activity) entries.push(...this.activity.markers());
+    else {
+      const mote = this.collectibles.nearest(this.player.position, 220);
+      if (mote) entries.push({ position: mote, style: "collectible", radius: 5 });
+      if (this.nearestActivity) {
+        entries.push({ position: this.nearestActivity.anchor, style: "objective", radius: 14 });
+      }
     }
+
+    // Focus paints the nearest live threat so the slowed world has a target.
+    if (this.focusActive) {
+      const threat = this.findTarget(160, -0.2);
+      if (threat) entries.push({ position: threat.position.clone(), style: "threat", radius: 10 });
+    }
+
     return entries;
   }
 

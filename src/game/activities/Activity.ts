@@ -7,6 +7,7 @@ import type { City } from "../world/City";
 import type { Rogue } from "../npc/Rogue";
 import type { Bystander } from "../npc/Bystander";
 import type { Rng } from "../core/Rng";
+import type { RouteGhost } from "./RouteGhost";
 
 /**
  * The shared contract for everything you can *do* in Meridian.
@@ -22,6 +23,8 @@ export interface ActivityWorld {
   effects: Effects;
   save: Save;
   rng: Rng;
+  /** Shared PB ghost mesh; RouteRun starts/stops it. */
+  routeGhost: RouteGhost | null;
   toast(message: string): void;
   /** Spawns a rogue for an encounter; the world owns its lifetime. */
   spawnRogue(id: string, position: Vector3): Rogue;
@@ -30,6 +33,8 @@ export interface ActivityWorld {
   /** Borrows a bystander from the shared pool, or null when exhausted. */
   takeBystander(): Bystander | null;
   releaseBystanders(): void;
+  /** Live remnant echo position, or null when none is active. */
+  remnantPosition(): Vector3 | null;
 }
 
 export type ActivityResult = "running" | "complete" | "failed";

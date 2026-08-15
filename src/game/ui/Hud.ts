@@ -156,7 +156,12 @@ export class Hud {
     setReady("ability-slide", player.speed > 20);
     setReady("ability-bolt", player.canBolt());
     setReady("ability-pulse", player.canPulse());
+    setReady("ability-phase", player.canPhase());
+    setReady("ability-remnant", player.canRemnant());
     setReady("ability-focus", player.charge > 0);
+
+    const mass = document.getElementById("ability-dash");
+    mass?.classList.toggle("mass-ready", player.massStrikeReady);
 
     this.moteCount.textContent = `${state.motesFound} / ${state.motesTotal}`;
 
