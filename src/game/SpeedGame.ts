@@ -6,6 +6,7 @@ import {
   HavokPlugin,
   ImageProcessingConfiguration,
   Matrix,
+  PointLight,
   Scene,
   Vector3,
 } from "@babylonjs/core";
@@ -56,6 +57,8 @@ export class SpeedGame {
   private camera!: FreeCamera;
   private pipeline!: DefaultRenderingPipeline;
   private effects!: Effects;
+  private heroFill!: PointLight;
+  private menuClock = 0;
   private markers!: Markers;
   private collectibles!: Collectibles;
   private hud!: Hud;
@@ -118,7 +121,7 @@ export class SpeedGame {
     this.player = new Player(this.scene, this.city.start);
     this.city.addShadowCaster(this.player.model.shadowCaster);
 
-    this.effects = new Effects(this.scene, this.player.model.ghostSource, quality);
+    this.effects = new Effects(this.scene, this.player.model.ghostSource, quality, this.player.model.trailAnchors);
     this.effects.setReducedMotion(this.save.settings.reducedMotion);
     this.markers = new Markers(this.scene);
     this.collectibles = new Collectibles(this.scene, this.city, this.rng, this.save);
@@ -131,6 +134,11 @@ export class SpeedGame {
     }
 
     this.setupCamera(quality);
+    this.heroFill = new PointLight("hero-soft-fill", this.camera.position.clone(), this.scene);
+    this.heroFill.diffuse.set(0.66, 0.8, 1);
+    this.heroFill.intensity = 5;
+    this.heroFill.range = 12;
+    this.heroFill.includedOnlyMeshes = this.player.root.getChildMeshes();
 
     this.hud = new Hud(this.city);
     this.hud.setRenderer(renderer);
@@ -168,24 +176,24 @@ export class SpeedGame {
     // and a speed-driven chromatic aberration that only shows up at pace.
     this.pipeline = new DefaultRenderingPipeline("photographic", true, this.scene, [this.camera]);
     this.pipeline.fxaaEnabled = true;
-    this.pipeline.bloomEnabled = true;
-    this.pipeline.bloomThreshold = 0.82;
-    this.pipeline.bloomWeight = 0.24;
+    this.pipeline.bloomEnabled = quality !== "low";
+    this.pipeline.bloomThreshold = 1.1;
+    this.pipeline.bloomWeight = 0.16;
     this.pipeline.bloomKernel = 48;
     this.pipeline.bloomScale = 0.5;
     this.pipeline.chromaticAberrationEnabled = quality !== "low";
     this.pipeline.chromaticAberration.aberrationAmount = 0;
-    this.pipeline.grainEnabled = quality === "high";
-    if (this.pipeline.grainEnabled) this.pipeline.grain.intensity = 4;
+    this.pipeline.grainEnabled = false;
     this.pipeline.sharpenEnabled = quality === "high";
+    this.pipeline.sharpen.edgeAmount = 0.12;
 
     const processing = this.scene.imageProcessingConfiguration;
     processing.toneMappingEnabled = true;
     processing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
     processing.exposure = 1.1;
-    processing.contrast = 1.08;
+    processing.contrast = 1.12;
     processing.vignetteEnabled = true;
-    processing.vignetteWeight = 1.5;
+    processing.vignetteWeight = 0.8;
     processing.vignetteColor = new Color4(0.03, 0.03, 0.04, 0);
   }
 
@@ -224,11 +232,14 @@ export class SpeedGame {
         this.effects.update(frameDt, this.player, this.focusActive);
         this.markers.update(frameDt, this.player.position);
         this.city.sky.update(frameDt);
+        this.city.palette.update(frameDt, this.city.sky.nightAmount);
         this.city.updateStreaming(this.player.position);
         this.scene.imageProcessingConfiguration.exposure = this.city.sky.exposure;
         this.hud.update(frameDt, this.player, this.hudState());
       }
 
+      if (this.mode === "menu") this.updateShowcase(frameDt);
+      this.heroFill.position.copyFrom(this.camera.position);
       this.scene.render();
     });
   }
@@ -328,6 +339,8 @@ export class SpeedGame {
     const settings = this.save.settings;
     this.input.lookSensitivity = settings.lookSensitivity;
     this.effects.setReducedMotion(settings.reducedMotion);
+    this.city.sky.setReducedMotion(settings.reducedMotion);
+    document.documentElement.classList.toggle("reduced-motion", settings.reducedMotion);
     this.city.setDetailRadius(
       settings.quality === "low" ? 260 : settings.quality === "medium" ? 420 : 620,
     );
@@ -344,6 +357,7 @@ export class SpeedGame {
     this.city.sky.setAtmosphere("golden", true);
     this.input.releaseAll();
     this.player.teleport(this.city.start);
+    this.resetChaseCamera();
     this.player.health = 100;
     this.player.charge = 50;
     this.hud.setVisible(true);
@@ -359,6 +373,7 @@ export class SpeedGame {
     this.player.charge = 60;
     this.campaign = new Campaign(chapter, this.world, this.dialogue);
     this.campaign.start();
+    this.resetChaseCamera();
     this.input.releaseAll();
     this.save.update((profile) => {
       profile.campaign.current = chapter.id;
@@ -390,6 +405,9 @@ export class SpeedGame {
     this.input.releasePointerLock();
     this.input.setEnabled(false);
     this.save.flush();
+    this.city.sky.setAtmosphere("golden", true);
+    this.player.teleport(this.city.start);
+    this.player.model.resetPose();
     this.menu.show();
   }
 
@@ -401,6 +419,8 @@ export class SpeedGame {
     this.world.clearRogues();
     this.world.releaseBystanders();
     this.markers.clear();
+    this.effects.reset();
+    this.focusActive = false;
     this.dialogue.hide();
     this.accumulator = 0;
   }
@@ -736,6 +756,40 @@ export class SpeedGame {
   /* Presentation                                                        */
   /* ------------------------------------------------------------------ */
 
+  private resetChaseCamera(): void {
+    this.cameraYaw = 0;
+    this.cameraPitch = 0.16;
+    this.cameraRoll = 0;
+    this.shake = 0;
+    this.camera.upVector.set(0, 1, 0);
+    this.camera.position.copyFrom(this.player.position).addInPlaceFromFloats(0, 2.6, -4.4);
+    this.camera.fov = 0.88;
+  }
+
+  /** The playable rig doubles as the title-screen portrait; no separate art. */
+  private updateShowcase(dt: number): void {
+    const reduced = this.save.settings.reducedMotion;
+    if (!reduced) this.menuClock += dt;
+    this.player.model.pose({ dt: reduced ? 0 : dt, speed: 0, speedRatio: 0, grounded: true,
+      wallSide: 0, verticalRun: false, sliding: false, strike: 0, turn: 0 });
+    this.player.model.setCharge(0.15, false);
+    this.player.root.rotation.y = -0.25 + Math.sin(this.menuClock * 0.18) * 0.16;
+    const p = this.player.position;
+    const aspect = this.scene.getEngine().getAspectRatio(this.camera);
+    // At narrow widths the interface uses a solid backdrop; keep the portrait
+    // centred behind it instead of cropping a head at the edge of the screen.
+    const offset = aspect > 1.2 ? Math.min(0.9, aspect * 0.43) : 0;
+    this.camera.position.set(p.x + 1.8, p.y + 1.23, p.z + 2.8);
+    this.camera.upVector.set(0, 1, 0);
+    this.camera.setTarget(new Vector3(p.x + offset * 0.84, p.y + 0.94, p.z - offset * 0.54));
+    this.camera.fov = 0.62;
+    this.pipeline.chromaticAberration.aberrationAmount = 0;
+    this.city.sky.update(dt);
+    this.city.palette.update(dt, this.city.sky.nightAmount);
+    this.city.updateStreaming(p);
+    this.scene.imageProcessingConfiguration.exposure = this.city.sky.exposure;
+  }
+
   private updateCamera(dt: number): void {
     if (!this.dialogue.active) {
       const look = this.input.takeLook();
@@ -748,8 +802,8 @@ export class SpeedGame {
     const forward = new Vector3(Math.sin(this.cameraYaw), 0, Math.cos(this.cameraYaw));
 
     // Pull back and drop low as speed rises; the horizon does the work.
-    const distance = 6.2 + ratio * 7.5;
-    const height = 2.4 + ratio * 1.6 + this.cameraPitch * 9;
+    const distance = 4.4 + ratio * 5.8;
+    const height = 1.8 + ratio * 1.1 + this.cameraPitch * 5;
     const desired = player.position
       .subtract(forward.scale(distance))
       .addInPlaceFromFloats(0, height, 0);
@@ -773,7 +827,7 @@ export class SpeedGame {
 
     // Roll the horizon during wall runs — the single clearest read that the
     // player is no longer on the ground.
-    const targetRoll = player.state === "wall" ? player.wallSide * 0.42 : 0;
+    const targetRoll = !this.save.settings.reducedMotion && player.state === "wall" ? player.wallSide * 0.42 : 0;
     this.cameraRoll += (targetRoll - this.cameraRoll) * damp(6, dt);
     const up = Vector3.TransformNormal(
       Vector3.Up(),
@@ -785,10 +839,11 @@ export class SpeedGame {
       .add(forward.scale(4 + ratio * 12))
       .addInPlaceFromFloats(0, 1.4 + this.cameraPitch * 2.5, 0);
     this.camera.setTarget(target);
-    this.camera.fov = 0.92 + ratio * 0.34 + (this.focusActive ? 0.05 : 0);
+    const targetFov = this.save.settings.reducedMotion ? 0.92 : 0.88 + ratio * 0.28 + (this.focusActive ? 0.03 : 0);
+    this.camera.fov += (targetFov - this.camera.fov) * damp(7, dt);
 
     if (this.pipeline.chromaticAberrationEnabled) {
-      this.pipeline.chromaticAberration.aberrationAmount = ratio * ratio * 22;
+      this.pipeline.chromaticAberration.aberrationAmount = this.save.settings.reducedMotion ? 0 : ratio * ratio * 3;
     }
   }
 

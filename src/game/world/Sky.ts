@@ -46,12 +46,12 @@ interface Atmosphere {
 
 const ATMOSPHERES: Record<AtmosphereId, Atmosphere> = {
   golden: {
-    sun: new Vector3(-0.46, -0.72, 0.34).normalize(),
+    sun: new Vector3(-0.56, -0.43, 0.5).normalize(),
     sunColor: new Color3(1, 0.87, 0.7),
-    sunIntensity: 3.6,
+    sunIntensity: 2.7,
     skyColor: new Color3(0.68, 0.74, 0.84),
     groundColor: new Color3(0.44, 0.41, 0.37),
-    ambientIntensity: 0.85,
+    ambientIntensity: 0.7,
     fogColor: new Color3(0.74, 0.78, 0.81),
     fogDensity: 0.00024,
     exposure: 1.1,
@@ -209,6 +209,7 @@ export class Sky {
   private lightningTimer = 4;
   private lightningFlash = 0;
   private elapsed = 0;
+  private reducedMotion = false;
 
   constructor(
     private readonly scene: Scene,
@@ -233,10 +234,10 @@ export class Sky {
     this.shadows.lambda = 0.88;
     this.shadows.shadowMaxZ = quality === "low" ? 320 : 520;
     this.shadows.stabilizeCascades = true;
-    this.shadows.bias = 0.008;
-    this.shadows.normalBias = 0.02;
-    this.shadows.setDarkness(0.28);
-    // Casters are hidden hull proxies with visibility 0. Babylon treats
+    this.shadows.bias = 0.0003;
+    this.shadows.normalBias = 0.08;
+    this.shadows.setDarkness(0.12);
+    // NPC casters still use hidden hull proxies with visibility 0. Babylon treats
     // visibility < 1 as needing alpha blending and drops those submeshes from
     // the shadow map unless this is on, which is why the actors were casting
     // nothing at all. Soft transparent shadows stay off, so they cast solid.
@@ -304,7 +305,7 @@ export class Sky {
       material.useAlphaFromDiffuseTexture = true;
       material.disableLighting = true;
       material.disableDepthWrite = true;
-      material.alphaMode = 1;
+      material.alphaMode = 2; // standard alpha: clouds can shade the sky
       mesh.material = material;
       mesh.billboardMode = Mesh.BILLBOARDMODE_ALL;
       mesh.infiniteDistance = true;
@@ -325,6 +326,11 @@ export class Sky {
 
   get atmosphere(): AtmosphereId {
     return this.current;
+  }
+
+  /** Lighting-derived blend also follows chapter transitions. */
+  get nightAmount(): number {
+    return Math.max(0, Math.min(1, (2.7 - this.blend.sunIntensity) / 2.15));
   }
 
   /** Screen exposure the post pipeline should currently use. */
@@ -349,6 +355,11 @@ export class Sky {
     if (immediate) this.applyImmediate(id);
     this.domeMaterial.emissiveTexture = this.gradientFor(id);
     this.scene.environmentTexture = this.environmentFor(id);
+  }
+
+  setReducedMotion(value: boolean): void {
+    this.reducedMotion = value;
+    if (value) { this.lightningFlash = 0; this.push(); }
   }
 
   update(dt: number): void {
@@ -378,7 +389,7 @@ export class Sky {
     }
 
     // Storms crack; everything else stays quiet.
-    if (this.current === "storm") {
+    if (this.current === "storm" && !this.reducedMotion) {
       this.lightningTimer -= dt;
       if (this.lightningTimer <= 0) {
         this.lightningTimer = 2.5 + Math.random() * 6;
@@ -393,7 +404,7 @@ export class Sky {
     }
 
     for (const cloud of this.clouds) {
-      cloud.azimuth += cloud.drift * dt;
+      if (!this.reducedMotion) cloud.azimuth += cloud.drift * dt;
       const cos = Math.cos(cloud.elevation);
       cloud.mesh.position.set(
         cos * Math.sin(cloud.azimuth),

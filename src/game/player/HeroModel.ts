@@ -6,16 +6,17 @@ import {
   Scene,
   TransformNode,
   Vector3,
+  VertexData,
+  DynamicTexture,
 } from "@babylonjs/core";
 import { clamp, damp, lerp } from "../core/Rng";
 
 /**
  * The hero rig.
  *
- * Built from primitives, but built like a character: real human proportions
- * (1.86 m), a layered torso that tapers, jointed limbs with pads at the
- * hinges, boots with soles, and resonance lines that brighten as the runner
- * loads up. Everything hangs off named pivots so the animation code only ever
+ * Authored elliptical body sections create an athletic 1.81 m silhouette,
+ * with ceramic suit plates, a continuous curved visor and fabric underlayers.
+ * Resonance inlays trace the scapulae, spine, wrists and calves at speed. Everything hangs off named pivots so the animation code only ever
  * writes rotations — no mesh is ever moved directly.
  */
 
@@ -49,10 +50,11 @@ export interface PoseInput {
 
 export class HeroModel {
   readonly root: TransformNode;
-  /** Single hull proxy for cascaded shadows; limbs stay out of the map. */
+  /** Parent of the actual animated shadow casters. */
   readonly shadowCaster: Mesh;
   /** Low-poly merged silhouette, instanced for speed afterimages. */
   readonly ghostSource: Mesh;
+  readonly trailAnchors: TransformNode[];
 
   private readonly body: TransformNode;
   private readonly spine: TransformNode;
@@ -70,308 +72,186 @@ export class HeroModel {
   private roll = 0;
   private crouch = 0;
   private pitch = 0;
+  private poseBlend = 1;
 
   constructor(scene: Scene) {
     this.root = new TransformNode("hero", scene);
 
-    const suit = pbr(scene, "hero-suit", "#7d1f2b", 0.46, 0.06);
-    const panel = pbr(scene, "hero-panel", "#23262a", 0.52, 0.12);
-    const trim = pbr(scene, "hero-trim", "#b98f43", 0.28, 0.85);
-    const skin = pbr(scene, "hero-skin", "#b9866a", 0.72, 0);
-    const sole = pbr(scene, "hero-sole", "#15171a", 0.88, 0);
+    // Garnet ceramic over a graphite compression suit. Pale shoulder armour
+    // and the split amber spine remain legible from the chase camera.
+    const suit = pbr(scene, "hero-suit", "#9b243d", 0.38, 0.24);
+    suit.clearCoat.isEnabled = true;
+    suit.clearCoat.intensity = 0.35;
+    suit.clearCoat.roughness = 0.28;
+    const panel = pbr(scene, "hero-panel", "#18242e", 0.78, 0.05);
+    panel.bumpTexture = createSuitWeave(scene);
+    const armour = pbr(scene, "hero-armour", "#d8dbd3", 0.3, 0.38);
+    const trim = pbr(scene, "hero-trim", "#b79761", 0.28, 0.78);
+    const sole = pbr(scene, "hero-sole", "#10151d", 0.88, 0);
+    this.visorMaterial = pbr(scene, "hero-visor", "#111e2d", 0.12, 0.7);
+    this.visorMaterial.clearCoat.isEnabled = true;
+    this.visorMaterial.clearCoat.intensity = 1;
+    this.resonance = pbr(scene, "hero-resonance", "#29161c", 0.32, 0.25);
+    this.setCharge(0, false);
 
-    this.visorMaterial = pbr(scene, "hero-visor", "#0d1116", 0.08, 0.35);
-    this.visorMaterial.emissiveColor = new Color3(0.04, 0.07, 0.1);
-
-    this.resonance = pbr(scene, "hero-resonance", "#1a1416", 0.4, 0.1);
-    this.resonance.emissiveColor = new Color3(0.35, 0.2, 0.06);
-
-    // Invisible upright hull for CSM. visibility 0 only casts because the
-    // generator runs with transparencyShadow enabled — see Sky.ts.
-    this.shadowCaster = MeshBuilder.CreateCapsule(
-      "hero-shadow",
-      { height: 1.8, radius: 0.3, tessellation: 6 },
-      scene,
-    );
+    // Register the actual animated mesh descendants for shadows. An empty
+    // parent mesh replaces the upright capsule proxy, including on walls.
+    this.shadowCaster = new Mesh("hero-shadow-root", scene);
     this.shadowCaster.parent = this.root;
-    this.shadowCaster.position.y = 0.9;
-    this.shadowCaster.isPickable = false;
-    this.shadowCaster.visibility = 0;
-    this.shadowCaster.receiveShadows = false;
-
-    this.body = new TransformNode("hero-body", scene);
-    this.body.parent = this.root;
-
+    this.body = this.shadowCaster;
     const attach = (mesh: Mesh, material: PBRMaterial, parent: TransformNode): Mesh => {
       mesh.material = material;
       mesh.parent = parent;
       mesh.isPickable = false;
+      mesh.receiveShadows = true;
       return mesh;
     };
+    const form = (name: string, rings: BodyRing[], material: PBRMaterial, parent: TransformNode): Mesh =>
+      attach(sculpt(name, rings, scene), material, parent);
+    const oval = (name: string, size: Vector3, at: Vector3, material: PBRMaterial, parent: TransformNode): Mesh => {
+      const mesh = MeshBuilder.CreateSphere(name, { diameter: 2, segments: 16 }, scene);
+      mesh.scaling.copyFrom(size);
+      mesh.position.copyFrom(at);
+      return attach(mesh, material, parent);
+    };
+    const seam = (name: string, points: number[][], radius: number, material: PBRMaterial, parent: TransformNode): Mesh =>
+      attach(MeshBuilder.CreateTube(name, {
+        path: points.map(([x = 0, y = 0, z = 0]) => new Vector3(x, y, z)),
+        radius, tessellation: 6, cap: Mesh.CAP_ALL,
+      }, scene), material, parent);
 
-    /* -------- pelvis and spine -------- */
-
-    const pelvis = MeshBuilder.CreateCapsule(
-      "hero-pelvis",
-      { height: 0.3, radius: 0.16, tessellation: 12 },
-      scene,
-    );
-    pelvis.position.y = HIP_Y + 0.02;
-    pelvis.scaling.set(1.05, 1, 0.74);
-    attach(pelvis, panel, this.body);
-
+    form("hero-pelvis", [
+      [0.85, 0.1, 0.09], [0.91, 0.155, 0.12], [1.01, 0.155, 0.11], [1.06, 0.135, 0.1],
+    ], panel, this.body);
     this.spine = new TransformNode("hero-spine", scene);
     this.spine.parent = this.body;
     this.spine.position.y = SPINE_Y;
+    form("hero-anatomical-torso", [
+      [-0.04, 0.133, 0.102], [0.06, 0.14, 0.11], [0.17, 0.158, 0.12],
+      [0.29, 0.198, 0.139], [0.39, 0.212, 0.132], [0.45, 0.175, 0.107],
+      [0.51, 0.075, 0.071],
+    ], panel, this.spine);
 
-    const waist = MeshBuilder.CreateCapsule(
-      "hero-waist",
-      { height: 0.26, radius: 0.15, tessellation: 12 },
-      scene,
-    );
-    waist.position.y = 0.08;
-    waist.scaling.set(1.06, 1, 0.76);
-    attach(waist, suit, this.spine);
-
-    // A separate, wider chest volume is what gives the athletic V-taper that a
-    // single capsule never reads as.
-    const chest = MeshBuilder.CreateCapsule(
-      "hero-chest",
-      { height: 0.3, radius: 0.2, tessellation: 14 },
-      scene,
-    );
-    chest.position.y = 0.31;
-    chest.scaling.set(1.14, 1, 0.72);
-    attach(chest, suit, this.spine);
-
-    const lats = MeshBuilder.CreateBox("hero-lats", { width: 0.36, height: 0.2, depth: 0.2 }, scene);
-    lats.position.set(0, 0.24, -0.03);
-    attach(lats, panel, this.spine);
-
-    // Chevron chest plate.
     for (const side of [-1, 1] as const) {
-      const wing = MeshBuilder.CreateBox(
-        `hero-chevron-${side}`,
-        { width: 0.19, height: 0.055, depth: 0.045 },
-        scene,
-      );
-      wing.position.set(side * 0.075, 0.36, 0.145);
-      wing.rotation.z = side * 0.42;
-      attach(wing, trim, this.spine);
+      // Pectoral and scapular plates have rounded edges and wrap the torso,
+      // rather than intersecting cylinders across the chest.
+      const chest = oval(`hero-pectoral-${side}`, new Vector3(0.108, 0.105, 0.035),
+        new Vector3(side * 0.097, 0.345, 0.112), suit, this.spine);
+      chest.rotation.z = side * 0.15;
+      const back = oval(`hero-scapula-${side}`, new Vector3(0.105, 0.12, 0.035),
+        new Vector3(side * 0.098, 0.335, -0.115), suit, this.spine);
+      back.rotation.z = -side * 0.22;
+      seam(`hero-back-chevron-${side}`, [
+        [side * 0.19, 0.405, -0.1], [side * 0.105, 0.355, -0.151],
+        [side * 0.025, 0.275, -0.14], [side * 0.025, 0.05, -0.115],
+      ], 0.012, this.resonance, this.spine);
+      seam(`hero-chest-seam-${side}`, [
+        [side * 0.17, 0.43, 0.105], [side * 0.08, 0.38, 0.151], [0, 0.285, 0.155],
+      ], 0.009, trim, this.spine);
+      seam(`hero-flank-${side}`, [
+        [side * 0.175, 0.27, 0.03], [side * 0.155, 0.17, 0.035], [side * 0.14, 0.045, 0.045],
+      ], 0.022, suit, this.spine);
     }
-
-    const emblem = MeshBuilder.CreateCylinder(
-      "hero-emblem",
-      { height: 0.02, diameter: 0.1, tessellation: 18 },
-      scene,
-    );
-    emblem.position.set(0, 0.3, 0.155);
-    emblem.rotation.x = Math.PI * 0.5;
-    attach(emblem, trim, this.spine);
-
-    const belt = MeshBuilder.CreateCylinder(
-      "hero-belt",
-      { height: 0.05, diameter: 0.32, tessellation: 16 },
-      scene,
-    );
-    belt.position.y = -0.03;
-    belt.scaling.set(1.02, 1, 0.78);
-    attach(belt, trim, this.spine);
-
-    // Resonance line down the sternum.
-    const sternum = MeshBuilder.CreateBox(
-      "hero-sternum-line",
-      { width: 0.022, height: 0.26, depth: 0.02 },
-      scene,
-    );
-    sternum.position.set(0, 0.16, 0.152);
-    attach(sternum, this.resonance, this.spine);
-
-    /* -------- head -------- */
-
-    const neck = MeshBuilder.CreateCylinder(
-      "hero-neck",
-      { height: 0.09, diameter: 0.11, tessellation: 10 },
-      scene,
-    );
-    neck.position.y = 0.5;
-    attach(neck, skin, this.spine);
+    for (let i = 0; i < 3; i++) {
+      oval(`hero-abdominal-${i}`, new Vector3(0.106 - i * 0.009, 0.037, 0.018),
+        new Vector3(0, 0.21 - i * 0.073, 0.118 - i * 0.006), suit, this.spine);
+      oval(`hero-spine-plate-${i}`, new Vector3(0.036, 0.034, 0.018),
+        new Vector3(0, 0.22 - i * 0.07, -0.123), armour, this.spine);
+    }
+    const core = MeshBuilder.CreateTorus("hero-resonance-core", { diameter: 0.084, thickness: 0.015, tessellation: 24 }, scene);
+    core.rotation.x = Math.PI / 2;
+    core.position.set(0, 0.315, 0.154);
+    attach(core, this.resonance, this.spine);
+    form("hero-waist-seal", [[-0.045, 0.138, 0.108], [-0.01, 0.14, 0.111], [0.005, 0.136, 0.106]], trim, this.spine);
+    form("hero-collar", [[0.48, 0.071, 0.067], [0.545, 0.063, 0.063]], panel, this.spine);
 
     this.head = new TransformNode("hero-head", scene);
     this.head.parent = this.spine;
     this.head.position.y = 0.56;
-
-    const cowl = MeshBuilder.CreateSphere("hero-cowl", { diameter: 0.235, segments: 14 }, scene);
-    cowl.position.y = 0.055;
-    cowl.scaling.set(0.94, 1.13, 1);
-    attach(cowl, suit, this.head);
-
-    const jaw = MeshBuilder.CreateSphere("hero-jaw", { diameter: 0.17, segments: 12 }, scene);
-    jaw.position.set(0, -0.025, 0.055);
-    jaw.scaling.set(0.9, 0.72, 0.9);
-    attach(jaw, skin, this.head);
-
-    // Wraparound visor: a front pane plus two swept side wings.
-    const visor = MeshBuilder.CreateBox("hero-visor-pane", { width: 0.16, height: 0.05, depth: 0.035 }, scene);
-    visor.position.set(0, 0.062, 0.1);
-    attach(visor, this.visorMaterial, this.head);
-
-    for (const side of [-1, 1] as const) {
-      const wing = MeshBuilder.CreateBox(
-        `hero-visor-wing-${side}`,
-        { width: 0.07, height: 0.046, depth: 0.025 },
-        scene,
-      );
-      wing.position.set(side * 0.088, 0.062, 0.068);
-      wing.rotation.y = side * 0.7;
-      attach(wing, this.visorMaterial, this.head);
-
-      // Swept aero fins in place of ears.
-      const fin = MeshBuilder.CreateBox(
-        `hero-cowl-fin-${side}`,
-        { width: 0.018, height: 0.05, depth: 0.12 },
-        scene,
-      );
-      fin.position.set(side * 0.1, 0.105, -0.012);
-      fin.rotation.x = -0.34;
-      fin.rotation.z = side * 0.3;
-      attach(fin, trim, this.head);
+    form("hero-sculpted-helmet", [
+      [-0.048, 0.058, 0.063, 0.025], [-0.015, 0.083, 0.088, 0.012],
+      [0.05, 0.11, 0.113], [0.12, 0.106, 0.108, -0.009],
+      [0.19, 0.079, 0.08, -0.015], [0.216, 0.018, 0.022, -0.015],
+    ], suit, this.head);
+    // One continuous curved visor, conforming to the helmet's face.
+    const visorPath: Vector3[][] = [];
+    for (const y of [0.026, 0.075, 0.105]) {
+      const row: Vector3[] = [];
+      for (let i = 0; i <= 16; i++) {
+        const angle = -1.28 + i / 16 * 2.56;
+        row.push(new Vector3(Math.sin(angle) * 0.113, y, Math.cos(angle) * 0.118 + 0.004));
+      }
+      visorPath.push(row);
     }
-
-    /* -------- arms -------- */
+    attach(MeshBuilder.CreateRibbon("hero-wraparound-visor", { pathArray: visorPath, sideOrientation: Mesh.DOUBLESIDE }, scene), this.visorMaterial, this.head);
+    for (const side of [-1, 1] as const) {
+      oval(`hero-temple-${side}`, new Vector3(0.017, 0.04, 0.065),
+        new Vector3(side * 0.103, 0.067, -0.008), trim, this.head);
+      seam(`hero-temple-light-${side}`, [[side * 0.12, 0.072, 0.028], [side * 0.12, 0.084, -0.055]],
+        0.007, this.resonance, this.head);
+    }
+    seam("hero-helmet-crown", [[0, 0.193, 0.055], [0, 0.221, -0.01], [0, 0.19, -0.083], [0, 0.09, -0.116]],
+      0.008, trim, this.head);
+    oval("hero-chin-guard", new Vector3(0.066, 0.03, 0.018), new Vector3(0, -0.014, 0.095), panel, this.head);
 
     const buildArm = (side: -1 | 1): [TransformNode, TransformNode] => {
-      const label = side < 0 ? "l" : "r";
-      const shoulder = new TransformNode(`hero-shoulder-${label}`, scene);
+      const shoulder = new TransformNode(`hero-shoulder-${side}`, scene);
       shoulder.parent = this.spine;
       shoulder.position.set(side * SHOULDER_X, SHOULDER_Y, 0);
-
-      const deltoid = MeshBuilder.CreateSphere(`hero-deltoid-${label}`, { diameter: 0.17, segments: 12 }, scene);
-      deltoid.scaling.set(1, 1.08, 1);
-      attach(deltoid, suit, shoulder);
-
-      const upperArm = MeshBuilder.CreateCapsule(
-        `hero-upper-arm-${label}`,
-        { height: UPPER_ARM, radius: 0.058, tessellation: 10 },
-        scene,
-      );
-      upperArm.position.y = -UPPER_ARM * 0.5;
-      attach(upperArm, suit, shoulder);
-
-      const elbow = new TransformNode(`hero-elbow-${label}`, scene);
+      oval(`hero-deltoid-${side}`, new Vector3(0.095, 0.096, 0.095), new Vector3(side * 0.016, -0.022, 0), suit, shoulder);
+      oval(`hero-shoulder-shell-${side}`, new Vector3(0.075, 0.042, 0.091), new Vector3(side * 0.035, 0.039, 0), armour, shoulder);
+      form(`hero-upper-arm-${side}`, [[-0.02, 0.073, 0.075], [-0.12, 0.072, 0.079], [-0.23, 0.054, 0.06], [-UPPER_ARM, 0.043, 0.044]], suit, shoulder);
+      const elbow = new TransformNode(`hero-elbow-${side}`, scene);
       elbow.parent = shoulder;
       elbow.position.y = -UPPER_ARM;
-
-      const elbowPad = MeshBuilder.CreateSphere(`hero-elbow-pad-${label}`, { diameter: 0.098, segments: 10 }, scene);
-      attach(elbowPad, panel, elbow);
-
-      const forearm = MeshBuilder.CreateCapsule(
-        `hero-forearm-${label}`,
-        { height: FOREARM, radius: 0.05, tessellation: 10 },
-        scene,
-      );
-      forearm.position.y = -FOREARM * 0.5;
-      attach(forearm, panel, elbow);
-
-      // Gauntlet resonance line.
-      const line = MeshBuilder.CreateBox(`hero-arm-line-${label}`, { width: 0.016, height: 0.2, depth: 0.016 }, scene);
-      line.position.set(side * 0.05, -FOREARM * 0.5, 0.02);
-      attach(line, this.resonance, elbow);
-
-      const gauntlet = MeshBuilder.CreateCylinder(
-        `hero-gauntlet-${label}`,
-        { height: 0.06, diameter: 0.115, tessellation: 12 },
-        scene,
-      );
-      gauntlet.position.y = -FOREARM + 0.03;
-      attach(gauntlet, trim, elbow);
-
-      // Flattened fist rather than a ball.
-      const hand = MeshBuilder.CreateSphere(`hero-hand-${label}`, { diameter: 0.095, segments: 10 }, scene);
-      hand.position.y = -FOREARM - 0.05;
-      hand.scaling.set(0.78, 1.1, 0.6);
-      attach(hand, panel, elbow);
-
+      oval(`hero-elbow-joint-${side}`, new Vector3(0.046, 0.05, 0.048), Vector3.Zero(), panel, elbow);
+      form(`hero-forearm-${side}`, [[0, 0.045, 0.045], [-0.065, 0.067, 0.068], [-0.16, 0.053, 0.058], [-FOREARM, 0.034, 0.038]], panel, elbow);
+      oval(`hero-gauntlet-shell-${side}`, new Vector3(0.034, 0.094, 0.026), new Vector3(side * 0.04, -0.135, -0.017), suit, elbow);
+      seam(`hero-gauntlet-light-${side}`, [[side * 0.064, -0.07, -0.024], [side * 0.052, -0.17, -0.027], [side * 0.038, -0.25, -0.02]], 0.009, this.resonance, elbow);
+      form(`hero-wrist-seal-${side}`, [[-0.255, 0.039, 0.042], [-0.285, 0.037, 0.04]], trim, elbow);
+      oval(`hero-glove-${side}`, new Vector3(0.044, 0.065, 0.033), new Vector3(0, -FOREARM - 0.045, 0.014), panel, elbow);
+      oval(`hero-thumb-${side}`, new Vector3(0.022, 0.033, 0.026), new Vector3(-side * 0.035, -FOREARM - 0.015, 0.037), suit, elbow);
+      oval(`hero-knuckles-${side}`, new Vector3(0.038, 0.025, 0.012), new Vector3(0, -FOREARM - 0.069, 0.043), armour, elbow);
       return [shoulder, elbow];
     };
-
     const [shoulderL, elbowL] = buildArm(-1);
     const [shoulderR, elbowR] = buildArm(1);
     this.shoulder = [shoulderL, shoulderR];
     this.elbow = [elbowL, elbowR];
 
-    /* -------- legs -------- */
-
     const buildLeg = (side: -1 | 1): [TransformNode, TransformNode, TransformNode] => {
-      const label = side < 0 ? "l" : "r";
-      const hip = new TransformNode(`hero-hip-${label}`, scene);
+      const hip = new TransformNode(`hero-hip-${side}`, scene);
       hip.parent = this.body;
-      hip.position.set(side * 0.09, HIP_Y, 0);
-
-      const thigh = MeshBuilder.CreateCapsule(
-        `hero-thigh-${label}`,
-        { height: THIGH, radius: 0.083, tessellation: 10 },
-        scene,
-      );
-      thigh.position.y = -THIGH * 0.5;
-      thigh.scaling.set(1.08, 1, 1.02);
-      attach(thigh, suit, hip);
-
-      const knee = new TransformNode(`hero-knee-${label}`, scene);
+      hip.position.set(side * 0.091, HIP_Y, 0);
+      form(`hero-thigh-${side}`, [[0.02, 0.086, 0.097], [-0.09, 0.1, 0.112], [-0.24, 0.079, 0.09], [-THIGH, 0.055, 0.058]], suit, hip);
+      seam(`hero-thigh-inlay-${side}`, [[side * 0.087, -0.065, -0.045], [side * 0.083, -0.19, -0.04], [side * 0.055, -0.36, -0.018]], 0.013, trim, hip);
+      const knee = new TransformNode(`hero-knee-${side}`, scene);
       knee.parent = hip;
       knee.position.y = -THIGH;
-
-      const kneePad = MeshBuilder.CreateSphere(`hero-knee-pad-${label}`, { diameter: 0.12, segments: 10 }, scene);
-      kneePad.position.z = 0.018;
-      kneePad.scaling.y = 1.12;
-      attach(kneePad, panel, knee);
-
-      const shin = MeshBuilder.CreateCapsule(
-        `hero-shin-${label}`,
-        { height: SHIN, radius: 0.066, tessellation: 10 },
-        scene,
-      );
-      shin.position.y = -SHIN * 0.5;
-      attach(shin, panel, knee);
-
-      const line = MeshBuilder.CreateBox(`hero-shin-line-${label}`, { width: 0.016, height: 0.22, depth: 0.016 }, scene);
-      line.position.set(0, -SHIN * 0.5, 0.062);
-      attach(line, this.resonance, knee);
-
-      const ankle = new TransformNode(`hero-ankle-${label}`, scene);
+      oval(`hero-knee-joint-${side}`, new Vector3(0.056, 0.062, 0.06), Vector3.Zero(), panel, knee);
+      oval(`hero-kneecap-${side}`, new Vector3(0.049, 0.061, 0.024), new Vector3(0, 0.002, 0.053), armour, knee);
+      form(`hero-calf-${side}`, [[0, 0.053, 0.055], [-0.1, 0.079, 0.085, -0.018], [-0.21, 0.063, 0.07, -0.012], [-SHIN, 0.036, 0.04]], panel, knee);
+      oval(`hero-shin-shell-${side}`, new Vector3(0.045, 0.125, 0.02), new Vector3(0, -0.19, 0.052), suit, knee);
+      seam(`hero-calf-light-${side}`, [[side * 0.048, -0.05, -0.058], [side * 0.057, -0.14, -0.084], [side * 0.035, -0.32, -0.049]], 0.009, this.resonance, knee);
+      const ankle = new TransformNode(`hero-ankle-${side}`, scene);
       ankle.parent = knee;
       ankle.position.y = -SHIN;
-
-      const boot = MeshBuilder.CreateBox(`hero-boot-${label}`, { width: 0.105, height: 0.075, depth: 0.16 }, scene);
-      boot.position.set(0, -0.012, 0.012);
-      attach(boot, panel, ankle);
-
-      const toe = MeshBuilder.CreateBox(`hero-toe-${label}`, { width: 0.1, height: 0.055, depth: 0.115 }, scene);
-      toe.position.set(0, -0.028, 0.125);
-      toe.rotation.x = 0.09;
-      attach(toe, panel, ankle);
-
-      const soleMesh = MeshBuilder.CreateBox(`hero-sole-${label}`, { width: 0.108, height: 0.026, depth: 0.26 }, scene);
-      soleMesh.position.set(0, -0.052, 0.055);
-      attach(soleMesh, sole, ankle);
-
-      const cuff = MeshBuilder.CreateCylinder(
-        `hero-cuff-${label}`,
-        { height: 0.05, diameter: 0.15, tessellation: 12 },
-        scene,
-      );
-      cuff.position.y = 0.045;
-      attach(cuff, trim, ankle);
-
+      form(`hero-boot-${side}`, [[-0.061, 0.057, 0.115, 0.049], [-0.025, 0.06, 0.113, 0.05], [0.015, 0.055, 0.092, 0.043], [0.09, 0.038, 0.045]], suit, ankle);
+      form(`hero-outsole-${side}`, [[-0.078, 0.058, 0.117, 0.05], [-0.057, 0.06, 0.119, 0.05]], sole, ankle);
+      seam(`hero-heel-light-${side}`, [[-0.04, -0.043, -0.059], [0, -0.043, -0.072], [0.04, -0.043, -0.059]], 0.009, this.resonance, ankle);
       return [hip, knee, ankle];
     };
-
     const [hipL, kneeL, ankleL] = buildLeg(-1);
     const [hipR, kneeR, ankleR] = buildLeg(1);
     this.hip = [hipL, hipR];
     this.knee = [kneeL, kneeR];
     this.ankle = [ankleL, ankleR];
-
+    this.trailAnchors = [elbowL, elbowR, ankleL, ankleR].map((parent, i) => {
+      const anchor = new TransformNode(`hero-trail-anchor-${i}`, scene);
+      anchor.parent = parent;
+      anchor.position.set(0, i < 2 ? -FOREARM : -0.04, i < 2 ? -0.02 : -0.07);
+      return anchor;
+    });
     this.ghostSource = buildGhostSource(scene);
   }
 
@@ -390,6 +270,19 @@ export class HeroModel {
     }
   }
 
+  /** Clear traversal offsets before the static/reduced-motion title portrait. */
+  resetPose(): void {
+    this.stride = 0;
+    this.lifetime = 0;
+    this.roll = 0;
+    this.crouch = 0;
+    this.pitch = 0;
+    this.body.position.setAll(0);
+    for (const joint of [this.body, this.spine, this.head, ...this.shoulder, ...this.elbow, ...this.hip, ...this.knee, ...this.ankle]) {
+      joint.rotation.setAll(0);
+    }
+  }
+
   setEnabled(value: boolean): void {
     this.root.setEnabled(value);
   }
@@ -405,9 +298,10 @@ export class HeroModel {
   pose(input: PoseInput): void {
     const { dt } = input;
     this.lifetime += dt;
+    this.poseBlend = damp(30, dt);
 
     const pace = clamp(input.speed / 14, 0, 1);
-    const cadence = Math.min(26, 3.2 + input.speed * 0.62);
+    const cadence = lerp(7.5, 22, Math.sqrt(clamp(input.speed / 90, 0, 1)));
     this.stride += dt * cadence * Math.max(pace, input.grounded ? 0.06 : 0.4);
     const p = this.stride;
 
@@ -427,10 +321,10 @@ export class HeroModel {
     const airborne = !input.grounded && !input.verticalRun && input.wallSide === 0;
 
     /* -------- root body -------- */
-    this.body.rotation.x = lean * 0.34 + this.pitch;
+    this.body.rotation.x = lean * 0.55 + this.pitch;
     this.body.rotation.z = this.roll + swingL * 0.03 * pace - clamp(input.turn, -1, 1) * 0.22;
     this.body.position.y =
-      Math.sin(p * 2) * 0.022 * pace * (input.grounded ? 1 : 0) - this.crouch * 0.42;
+      Math.cos(p * 2) * 0.032 * pace * (input.grounded ? 1 : 0) - this.crouch * 0.42;
 
     /* -------- spine and head -------- */
     this.spine.rotation.x = lean * 0.5 + breathe + this.crouch * 0.45;
@@ -449,27 +343,27 @@ export class HeroModel {
       this.setLeg(0, -0.5 - tuck * 0.3, tuck + 0.5, 0.1);
       this.setLeg(1, 0.42, 0.35, -0.15);
     } else {
-      const legAmp = 0.34 + pace * 0.82;
-      const kneeBase = 0.06 + pace * 0.16;
-      const kneeSwing = 0.42 + pace * 1.3;
+      const legAmp = pace * 1.1;
+      const kneeBase = 0.025 + pace * 0.16;
+      const kneeSwing = pace * 1.65;
       this.setLeg(
         0,
         -swingL * legAmp,
         kneeBase + Math.max(0, Math.sin(p - 1.9)) * kneeSwing,
-        0.06 + Math.max(0, -swingL) * (0.18 + pace * 0.5),
+        0.01 + Math.max(0, -swingL) * (0.18 + pace * 0.5),
       );
       this.setLeg(
         1,
         -swingR * legAmp,
         kneeBase + Math.max(0, Math.sin(p + Math.PI - 1.9)) * kneeSwing,
-        0.06 + Math.max(0, -swingR) * (0.18 + pace * 0.5),
+        0.01 + Math.max(0, -swingR) * (0.18 + pace * 0.5),
       );
     }
 
     /* -------- arms -------- */
     const strike = clamp(input.strike / 0.22, 0, 1);
-    const armAmp = 0.24 + pace * 0.66;
-    const elbowBend = 0.24 + pace * 1.25;
+    const armAmp = pace * 0.95;
+    const elbowBend = 0.13 + pace * 1.35;
 
     for (const side of [0, 1] as const) {
       const shoulder = this.shoulder[side];
@@ -495,9 +389,9 @@ export class HeroModel {
         bend = lerp(bend, -0.12, strike);
       }
 
-      shoulder.rotation.x = pitchX;
-      shoulder.rotation.z = outward;
-      elbow.rotation.x = bend;
+      shoulder.rotation.x = lerp(shoulder.rotation.x, pitchX, this.poseBlend);
+      shoulder.rotation.z = lerp(shoulder.rotation.z, outward, this.poseBlend);
+      elbow.rotation.x = lerp(elbow.rotation.x, bend, this.poseBlend);
     }
   }
 
@@ -505,9 +399,9 @@ export class HeroModel {
     const hip = this.hip[side];
     const knee = this.knee[side];
     const ankle = this.ankle[side];
-    hip.rotation.x = hipX;
-    knee.rotation.x = kneeX;
-    ankle.rotation.x = ankleX;
+    hip.rotation.x = lerp(hip.rotation.x, hipX, this.poseBlend);
+    knee.rotation.x = lerp(knee.rotation.x, kneeX, this.poseBlend);
+    ankle.rotation.x = lerp(ankle.rotation.x, ankleX, this.poseBlend);
   }
 }
 
@@ -581,4 +475,66 @@ export function ghostMaterialOf(mesh: Mesh): PBRMaterial | null {
 export function placeGhost(ghost: Mesh, position: Vector3, yaw: number, roll: number): void {
   ghost.position.copyFrom(position);
   ghost.rotation.set(0, yaw, roll);
+}
+
+/** Elliptical anatomical sections: y, half-width, half-depth, forward offset. */
+type BodyRing = [number, number, number, number?];
+
+function sculpt(name: string, input: BodyRing[], scene: Scene): Mesh {
+  const rings = [...input].sort((a, b) => a[0] - b[0]);
+  const positions: number[] = [], indices: number[] = [], normals: number[] = [], uvs: number[] = [];
+  const segments = 24;
+  // Smooth interpolation between authored sections avoids stacked-cone joints.
+  const sections: BodyRing[] = [];
+  for (let r = 0; r < rings.length - 1; r++) {
+    const a = rings[r]!, b = rings[r + 1]!;
+    for (let step = 0; step < 3; step++) {
+      const t = step / 3, smooth = t * t * (3 - 2 * t);
+      sections.push([lerp(a[0], b[0], t), lerp(a[1], b[1], smooth), lerp(a[2], b[2], smooth), lerp(a[3] ?? 0, b[3] ?? 0, smooth)]);
+    }
+  }
+  sections.push(rings[rings.length - 1]!);
+  for (let r = 0; r < sections.length; r++) {
+    const [y, w, d, z = 0] = sections[r]!;
+    for (let i = 0; i <= segments; i++) {
+      const angle = i / segments * Math.PI * 2;
+      positions.push(Math.sin(angle) * w, y, Math.cos(angle) * d + z);
+      uvs.push(i / segments, r / (sections.length - 1));
+      if (r < sections.length - 1 && i < segments) {
+        const a = r * (segments + 1) + i, b = a + segments + 1;
+        indices.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
+  }
+  for (const end of [0, sections.length - 1]) {
+    const [y, , , z = 0] = sections[end]!;
+    const center = positions.length / 3;
+    positions.push(0, y, z); uvs.push(0.5, end === 0 ? 0 : 1);
+    for (let i = 0; i < segments; i++) {
+      const a = end * (segments + 1) + i;
+      if (end === 0) indices.push(center, a, a + 1);
+      else indices.push(center, a + 1, a);
+    }
+  }
+  VertexData.ComputeNormals(positions, indices, normals);
+  const data = new VertexData();
+  data.positions = positions; data.indices = indices; data.normals = normals; data.uvs = uvs;
+  const mesh = new Mesh(name, scene);
+  data.applyToMesh(mesh);
+  return mesh;
+}
+
+function createSuitWeave(scene: Scene): DynamicTexture {
+  const texture = new DynamicTexture("hero-fabric-normal", 128, scene, true);
+  const ctx = texture.getContext();
+  ctx.fillStyle = "#8080ff"; ctx.fillRect(0, 0, 128, 128);
+  for (let y = 0; y < 128; y += 4) {
+    for (let x = 0; x < 128; x += 4) {
+      ctx.fillStyle = ((x + y) / 4) % 2 ? "#7985fc" : "#877bfc";
+      ctx.fillRect(x, y, 3, 2);
+    }
+  }
+  texture.update(); texture.gammaSpace = false;
+  texture.uScale = 4; texture.vScale = 4; texture.level = 0.2;
+  return texture;
 }

@@ -35,6 +35,16 @@ Chapters unlock in order, are replayable from the chapter-select screen, and the
 
 Story beats are authored as data in `src/game/story/script.ts`; the runner in `Campaign.ts` is mechanical. Adding a new objective type means one case in the runner and one entry in the script union.
 
+## Graphics: the resonance suit and Meridian
+
+Nolan now wears an authored **1.81 m athletic rig** with a sculpted torso, shaped thighs/calves, articulated boots and gloves, a continuous curved visor, and layered garnet/graphite/ivory armour. Woven fabric normals and ceramic/metal materials distinguish the suit layers. Amber inlays on the back, wrists and heels turn cold blue during focus. Actual animated limbs cast the character shadow.
+
+The title screen presents the playable character against the live city. The closer chase camera keeps the suit readable; smoother pose transitions, restrained bloom and age-faded wrist/heel ribbons carry the sense of speed. Reduced motion suppresses ribbons, afterimages, camera roll, speed zoom, chromatic aberration and storm flashes.
+
+Meridian gains facade fins and cornices, entrance bays, street trees, illuminated lamps, real building shadows, separate window-emission/roughness masks, and an animated, correctly tiled river. Art detail uses its own random stream to preserve the layout, rooftop heights, activities and saves.
+
+`npm run test:graphics` runs CPU geometry, animation, texture-mask, trail-lifecycle and city/traversal checks. It uses Babylon's NullEngine and a development-only native canvas package; it does **not** validate GPU shader output or frame rate. See [graphics implementation and validation](docs/GRAPHICS.md) for budgets and the visual review checklist.
+
 ## Movement
 
 The whole game is the handling model.
@@ -86,6 +96,7 @@ Production checks:
 ```bash
 npm run audit
 npm run typecheck
+npm run test:graphics
 npm run build
 npm run preview
 ```
@@ -113,7 +124,7 @@ When intentionally upgrading a dependency, run `npm install`, review both `packa
 | Source | Git + GitHub; Git LFS for large binaries only | Text stays reviewable; future models, textures and audio belong in LFS |
 | Desktop later | Tauri 2 wrapper | Reuses the web game and is lighter than bundling a full browser stack |
 
-Everything you see is generated at boot from Babylon primitives and canvas-painted procedural textures. There are no external art or audio assets, which keeps the build lightweight and legally clean.
+Everything you see is generated at boot from authored character geometry, Babylon primitives and canvas-painted procedural textures. There are no external art or audio assets, which keeps the build lightweight and legally clean.
 
 ### High-speed architecture
 
@@ -137,7 +148,7 @@ src/
     world/       City, Collision (spatial hash), Landmarks, Materials, Sky (atmospheres), Textures
     player/      Player (traversal state machine), HeroModel (rig + procedural animation)
     npc/         Rogue (encounter opponents), Bystander (rescue targets)
-    fx/          Effects (pooled rings, arcs, afterimages, particles), Markers (waypoints)
+    fx/          Effects (pooled rings, arcs, afterimages, particles), SpeedTrails (bounded ribbons), Markers (waypoints)
     activities/  Activity contract, RouteRun, RescueRun, RogueDuel, Collectibles, routes
     story/       script (the authored campaign), Campaign (chapter runner), cast
     ui/          Hud, Menu, Dialogue
@@ -165,7 +176,7 @@ Gameplay stays asset-agnostic. Replace primitives through factories rather than 
 
 - Traffic and civilians at city scale, not just around encounters.
 - City-cell streaming and floating-origin rebasing for a larger map.
-- A real animation state machine to replace the procedural poser: acceleration, braking, cornering, impacts.
+- Authored animation clips and foot placement IK beyond the current blended procedural rig: acceleration, braking, cornering, impacts.
 - Focus time that slows selected simulation layers rather than a single multiplier, with target marking and route planning.
 - Audio: footsteps, wind, cloth, impacts, electricity, ambience, dialogue and adaptive music.
 - Bosses that change traversal rules instead of gaining health.

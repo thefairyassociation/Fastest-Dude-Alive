@@ -9,7 +9,9 @@ import {
   PBRMaterial,
   Scene,
   Vector3,
+  TransformNode,
 } from "@babylonjs/core";
+import { SpeedTrails } from "./SpeedTrails";
 import { clamp } from "../core/Rng";
 import type { Quality } from "../core/Save";
 import { createSparkSprite } from "../world/Textures";
@@ -50,6 +52,7 @@ export class Effects {
   private readonly sparks: ParticleSystem;
   private readonly emitter: Mesh;
 
+  private readonly trails: SpeedTrails;
   private ghostClock = 0;
   private arcClock = 0;
   private reducedMotion = false;
@@ -58,7 +61,9 @@ export class Effects {
     private readonly scene: Scene,
     ghostSource: Mesh,
     quality: Quality,
+    trailAnchors: TransformNode[],
   ) {
+    this.trails = new SpeedTrails(scene, quality === "low" ? trailAnchors.slice(0, 2) : trailAnchors);
     const tones: Record<PulseTone, string> = {
       warm: "#ffc38a",
       cool: "#9fd4ff",
@@ -160,9 +165,19 @@ export class Effects {
   setReducedMotion(value: boolean): void {
     this.reducedMotion = value;
     if (value) {
+      this.trails.reset();
       this.slipstream.emitRate = 0;
       for (const ghost of this.ghosts) this.release(ghost);
     }
+  }
+
+  reset(): void {
+    this.trails.reset();
+    this.slipstream.reset(); this.sparks.reset();
+    this.slipstream.emitRate = 0;
+    for (const pool of this.pulses.values()) for (const entry of pool) this.release(entry);
+    for (const entry of this.bolts) this.release(entry);
+    for (const entry of this.ghosts) this.release(entry);
   }
 
   /* ---------------- spawners ---------------- */
@@ -174,7 +189,7 @@ export class Effects {
     if (!entry) return;
     entry.mesh.position.copyFrom(position);
     entry.mesh.position.y += 0.4;
-    entry.mesh.rotation.x = Math.PI * 0.5;
+    entry.mesh.rotation.x = 0;
     entry.mesh.scaling.setAll(diameter * 0.25);
     entry.mesh.visibility = 1;
     entry.mesh.setEnabled(true);
@@ -245,8 +260,9 @@ export class Effects {
     this.emitter.position.copyFrom(player.position);
 
     const ratio = player.speedRatio;
+    this.trails.update(dt, player.position, player.root.rotation.y, ratio, focusActive, this.reducedMotion);
     if (!this.reducedMotion) {
-      this.slipstream.emitRate = ratio > 0.14 ? ratio * ratio * 900 : 0;
+      this.slipstream.emitRate = ratio > 0.14 ? ratio * ratio * 460 : 0;
       this.slipstream.minEmitPower = 1 + ratio * 6;
       this.slipstream.maxEmitPower = 4 + ratio * 18;
       if (focusActive) {
@@ -260,7 +276,7 @@ export class Effects {
       // Afterimages: cadence tightens as the runner opens up.
       this.ghostClock -= dt;
       if (ratio > 0.3 && this.ghostClock <= 0) {
-        this.ghostClock = 0.05 - ratio * 0.028;
+        this.ghostClock = 0.11 - ratio * 0.04;
         this.spawnGhost(player);
       }
 
@@ -287,7 +303,7 @@ export class Effects {
     entry.mesh.position.copyFrom(player.position);
     entry.mesh.rotation.copyFrom(player.root.rotation);
     entry.mesh.setEnabled(true);
-    entry.alpha = clamp(player.speedRatio * 0.5, 0.08, 0.42);
+    entry.alpha = clamp(player.speedRatio * 0.23, 0.04, 0.2);
     entry.mesh.visibility = entry.alpha;
     entry.age = 0;
     entry.duration = 0.3;

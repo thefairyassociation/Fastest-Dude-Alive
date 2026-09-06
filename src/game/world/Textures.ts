@@ -14,6 +14,8 @@ import type { Rng } from "../core/Rng";
 export interface SurfaceMaps {
   albedo: DynamicTexture;
   normal: DynamicTexture;
+  emissive?: DynamicTexture;
+  roughness?: DynamicTexture;
   /** Metres covered by one tile, so UVs can be scaled to real-world size. */
   tileMeters: number;
 }
@@ -113,6 +115,7 @@ function heightToNormal(
 
   ctx.putImageData(out, 0, 0);
   texture.update(true);
+  texture.gammaSpace = false;
   return texture;
 }
 
@@ -308,6 +311,11 @@ export function createFacadeMaps(scene: Scene, style: FacadeStyle, rng: Rng): Su
   }
   ctx.globalAlpha = 1;
 
+  // Separate masks keep masonry dark and matte while windows reflect the sky.
+  const emission = scratch(size, size);
+  emission.fillStyle = "#000000"; emission.fillRect(0, 0, size, size);
+  const roughness = scratch(size, size);
+  roughness.fillStyle = "#dddddd"; roughness.fillRect(0, 0, size, size);
   const cellW = size / style.cols;
   const cellH = size / style.rows;
 
@@ -339,6 +347,9 @@ export function createFacadeMaps(scene: Scene, style: FacadeStyle, rng: Rng): Su
       hgt.fillStyle = "#5a5a5a";
       hgt.fillRect(x, y, winW, winH);
 
+      roughness.fillStyle = "#303030";
+      roughness.fillRect(x, y, winW, winH);
+
       // Per-pane exposure variation sells "many separate windows".
       ctx.globalAlpha = rng() * 0.24;
       ctx.fillStyle = rng() < 0.5 ? "#0c1117" : "#dfe9ef";
@@ -347,6 +358,11 @@ export function createFacadeMaps(scene: Scene, style: FacadeStyle, rng: Rng): Su
 
       if (rng() < style.litChance) {
         ctx.globalAlpha = 0.85;
+        emission.fillStyle = style.litColor;
+        emission.fillRect(x, y, winW, winH);
+        // A dark lower strip suggests an occupied room behind the glass.
+        emission.fillStyle = "#000000";
+        emission.fillRect(x, y + winH * 0.72, winW, winH * 0.08);
         ctx.fillStyle = style.litColor;
         ctx.fillRect(x, y, winW, winH);
         ctx.globalAlpha = 1;
@@ -362,6 +378,8 @@ export function createFacadeMaps(scene: Scene, style: FacadeStyle, rng: Rng): Su
         ctx.globalAlpha = 1;
         hgt.fillStyle = "#8e8e8e";
         hgt.fillRect(mx - 1, y, 2, winH);
+        emission.fillStyle = "#000000";
+        emission.fillRect(mx - 1, y, 2, winH);
       }
     }
   }
@@ -396,7 +414,14 @@ export function createFacadeMaps(scene: Scene, style: FacadeStyle, rng: Rng): Su
   hgt.fillRect(0, 0, 32, 32);
   hgt.fillRect(0, size - 32, 32, 32);
 
-  return publish(scene, `facade-${style.id}`, painter, FACADE_TILE_METERS, 2.4);
+  const maps = publish(scene, `facade-${style.id}`, painter, FACADE_TILE_METERS, 1.25);
+  for (const ctx of [emission, roughness]) {
+    ctx.fillStyle = ctx === emission ? "#000000" : "#dddddd";
+    ctx.fillRect(0, 0, 32, 32); ctx.fillRect(0, size - 32, 32, 32);
+  }
+  maps.emissive = publishMask(scene, `facade-${style.id}-emission`, emission, true);
+  maps.roughness = publishMask(scene, `facade-${style.id}-roughness`, roughness, false);
+  return maps;
 }
 
 /* ------------------------------------------------------------------ */
@@ -809,5 +834,14 @@ export function createSignTexture(
   texture.wrapU = Texture.CLAMP_ADDRESSMODE;
   texture.wrapV = Texture.CLAMP_ADDRESSMODE;
   texture.update();
+  return texture;
+}
+
+function publishMask(scene: Scene, name: string, source: CanvasRenderingContext2D, gamma: boolean): DynamicTexture {
+  const texture = new DynamicTexture(name, source.canvas.width, scene, true);
+  texture.getContext().drawImage(source.canvas, 0, 0);
+  texture.update(true);
+  configure(texture);
+  texture.gammaSpace = gamma;
   return texture;
 }
