@@ -88,6 +88,10 @@ export class Hud {
 
   setVisible(value: boolean): void {
     document.getElementById("hud")?.classList.toggle("is-hidden", !value);
+    if (!value) {
+      document.documentElement.style.setProperty("--speed-fx", "0");
+      document.documentElement.style.setProperty("--focus-fx", "0");
+    }
   }
 
   toggleMap(): boolean {

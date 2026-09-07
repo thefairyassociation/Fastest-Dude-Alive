@@ -260,6 +260,8 @@ export class City {
 
   private readonly chunks: Chunk[] = [];
   private readonly rng: Rng;
+  // Art detail must never perturb the layout RNG used by saved routes/motes.
+  private readonly artRng = mulberry32(0xa47d37);
   private detailRadius: number;
   private readonly scratchNormal = new Vector3();
 
@@ -425,8 +427,11 @@ export class City {
     const radiusSq = this.detailRadius * this.detailRadius;
     for (const chunk of this.chunks) {
       if (!chunk) continue;
-      const dx = chunk.centerX - focus.x;
-      const dz = chunk.centerZ - focus.z;
+      // Distance to the chunk bounds, not its centre: nearby props must not
+      // disappear merely because the player is at a 750 m chunk corner.
+      const halfSpan = CHUNK_BLOCKS * BLOCK_PITCH * 0.5;
+      const dx = Math.max(0, Math.abs(chunk.centerX - focus.x) - halfSpan);
+      const dz = Math.max(0, Math.abs(chunk.centerZ - focus.z) - halfSpan);
       const near = dx * dx + dz * dz < radiusSq;
       for (const mesh of chunk.mergedDetail) {
         if (mesh.isEnabled() !== near) mesh.setEnabled(near);
@@ -472,6 +477,7 @@ export class City {
     buildLandmarks(this.buildContext(), LANDMARK_SPECS, BLOCK_PITCH, BLOCK_SIZE, KERB_Y);
 
     this.mergeChunks();
+    this.updateStreaming(this.start);
     this.palette.freeze();
   }
 
@@ -525,7 +531,15 @@ export class City {
       this.scene,
     );
     water.position.set(centerX, WATER_Y, 0);
-    water.material = this.palette.get("water");
+    const waterMaterial = this.palette.get("water");
+    for (const texture of [waterMaterial.albedoTexture, waterMaterial.bumpTexture]) {
+      if (texture && "uScale" in texture) {
+        const tiled = texture as import("@babylonjs/core").Texture;
+        tiled.uScale = BLOCK_PITCH / 40;
+        tiled.vScale = length / 40;
+      }
+    }
+    water.material = waterMaterial;
     water.isPickable = false;
     water.freezeWorldMatrix();
 
@@ -584,6 +598,10 @@ export class City {
     }
 
     this.buildStreetlights(gx, gz, centerX, centerZ);
+    if (quality !== "low") {
+      // Street trees frame the avenues while leaving their full width clear.
+      for (const side of [-1, 1]) this.buildTree(this.artRng, centerX + side * 51, centerZ - 38);
+    }
     if (quality !== "low") this.buildParkedCars(rng, centerX, centerZ, district.carChance);
 
     if (isPark) {
@@ -626,6 +644,8 @@ export class City {
     );
     tower.position.set(x, height * 0.5 + KERB_Y, z);
     this.addMesh(materialKey, tower, false);
+
+    this.dressTower(x, z, width, depth, height, styleId);
 
     // Parapet lip: gives the roof an edge to mantle onto and reads at range.
     const parapet = MeshBuilder.CreateBox(
@@ -674,6 +694,46 @@ export class City {
     });
   }
 
+  /** Layered architecture inside the existing footprints and roof heights. */
+  private dressTower(x: number, z: number, w: number, d: number, h: number, style: string): void {
+    const glass = style === "glass-tower" || style === "panel-dark";
+    const art = this.artRng;
+    const box = (key: string, dx: number, y: number, dz: number, width: number, height: number, depth: number, detail = false): void => {
+      const mesh = MeshBuilder.CreateBox(`architecture-${key}`, { width, height, depth }, this.scene);
+      mesh.position.set(x + dx, KERB_Y + y, z + dz);
+      this.addMesh(key, mesh, detail);
+    };
+    const trim = glass ? "steel-bright" : "warm-stone";
+    // Two facade languages: curtain-wall fins and masonry cornices. Slender
+    // visual relief keeps the existing collision envelope and routes stable.
+    if (glass) {
+      for (const offset of [-0.42, 0, 0.42]) {
+        for (const side of [-1, 1]) {
+          box(trim, offset * w, h / 2, side * d / 2, 0.48, h, 0.38);
+          box(trim, side * w / 2, h / 2, offset * d, 0.38, h, 0.48);
+        }
+      }
+      const bandY = h * (0.6 + art() * 0.18);
+      box("steel", 0, bandY, 0, w + 0.3, 1.2, d + 0.3);
+      box("cyan-light", 0, h - 0.4, -d / 2 - 0.12, w * 0.92, 0.18, 0.1);
+    } else {
+      for (let y = 5; y < h; y += 12) box(trim, 0, y, 0, w + 0.4, 0.42, d + 0.4);
+      for (const side of [-1, 1]) {
+        box(trim, side * (w / 2 - 0.4), h / 2, -d / 2, 0.85, h, 0.4);
+        box(trim, side * (w / 2 - 0.4), h / 2, d / 2, 0.85, h, 0.4);
+      }
+    }
+    // A distinct ground-floor plinth and door bays establish human scale.
+    box(glass ? "steel" : "warm-stone", 0, 0.8, 0, w + 0.15, 1.6, d + 0.15);
+    for (const side of [-1, 1]) {
+      box("car-glass", 0, 2.3, side * (d / 2 + 0.1), 3.2, 4, 0.12, true);
+      box(trim, 0, 4.4, side * (d / 2 + 0.18), 4, 0.28, 0.4, true);
+      box("street-light", 0, 3.85, side * (d / 2 + 0.22), 2.6, 0.08, 0.05, true);
+    }
+    // Roof equipment stays below the unchanged parapet collision surface.
+    box("steel", 0, h + 0.3, 0, w * 0.38, 0.6, d * 0.24, true);
+  }
+
   private buildBridgeDeck(centerX: number, centerZ: number): void {
     const deck = MeshBuilder.CreateBox(
       `bridge-deck-${centerZ}`,
@@ -709,7 +769,7 @@ export class City {
     for (let i = 0; i < clusters; i += 1) {
       const crown = MeshBuilder.CreateSphere(
         `tree-crown-${x.toFixed(1)}-${z.toFixed(1)}-${i}`,
-        { diameter: (3.8 + rng() * 2.8) * scale, segments: 6 },
+        { diameter: (3.8 + rng() * 2.8) * scale, segments: 10 },
         this.scene,
       );
       crown.position.set(
@@ -756,7 +816,7 @@ export class City {
       );
       head.position.set(x + dx * 2.3, KERB_Y + 8.72, z + dz * 2.3);
       head.rotation.y = Math.atan2(dx, dz);
-      this.addMesh("steel", head, true);
+      this.addMesh("street-light", head, true);
 
       // Compact footprint: the arm and head are visual only.
       this.grid.add({
@@ -890,7 +950,14 @@ export class City {
       if (!chunk) continue;
       for (const [materialKey, meshes] of chunk.bulk) {
         const merged = this.mergeGroup(materialKey, meshes);
-        if (merged) chunk.mergedBulk.push(merged);
+        if (merged) {
+          chunk.mergedBulk.push(merged);
+          // The prototype only registered actors/landmarks. Without these
+          // casters, every avenue stayed uniformly lit under 200 m towers.
+          if (materialKey !== "grass" && materialKey !== "sidewalk") {
+            this.sky.shadows.addShadowCaster(merged, false);
+          }
+        }
       }
       for (const [materialKey, meshes] of chunk.detail) {
         const merged = this.mergeGroup(materialKey, meshes);

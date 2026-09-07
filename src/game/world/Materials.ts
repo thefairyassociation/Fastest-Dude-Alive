@@ -33,8 +33,13 @@ export class Palette {
       const maps = createFacadeMaps(scene, style, rng);
       const material = this.surface(key, maps, style.roughness, style.metallic);
       // Lit windows should not go pitch black at night.
-      material.emissiveTexture = maps.albedo;
-      material.emissiveColor = new Color3(0.045, 0.042, 0.036);
+      material.emissiveTexture = maps.emissive ?? null;
+      material.emissiveColor = new Color3(0.7, 0.7, 0.7);
+      material.metallicTexture = maps.roughness ?? null;
+      material.useRoughnessFromMetallicTextureGreen = true;
+      material.useRoughnessFromMetallicTextureAlpha = false;
+      material.useMetallnessFromMetallicTextureBlue = false;
+      material.roughness = 1;
       this.facadeKeys.push(key);
     }
 
@@ -45,7 +50,7 @@ export class Palette {
 
     const water = this.surface("water", createWaterMaps(scene, rng), 0.12, 0.1);
     water.albedoColor = new Color3(0.42, 0.55, 0.62);
-    water.alpha = 0.88;
+    water.alpha = 1;
     water.environmentIntensity = 1.5;
 
     this.flat("concrete", "#9d9a92", 0.88, 0.02);
@@ -58,6 +63,9 @@ export class Palette {
     this.flat("rubber", "#141517", 0.95, 0);
     this.flat("lab-white", "#dde1e3", 0.35, 0.06);
     this.flat("lab-trim", "#7fa8c4", 0.28, 0.4);
+    this.flat("warm-stone", "#b9aa91", 0.85, 0);
+    this.emissive("street-light", "#ffdda0", 1.8);
+    this.emissive("cyan-light", "#83dae0", 1.4);
     this.flat("police-blue", "#1d3352", 0.6, 0.05);
 
     const glass = this.flat("glass", "#4c6272", 0.06, 0.2);
@@ -105,7 +113,20 @@ export class Palette {
 
   /** Freezes every material once the world stops changing. */
   freeze(): void {
-    for (const material of this.materials.values()) material.freeze();
+    for (const [key, material] of this.materials) {
+      if (key === "water" || key.startsWith("facade:") || key.endsWith("-light")) continue;
+      material.freeze();
+    }
+  }
+
+  /** Only a handful of shared uniforms change; geometry stays merged. */
+  update(dt: number, night: number): void {
+    const water = this.get("water");
+    const normal = water.bumpTexture as Texture;
+    normal.uOffset = (normal.uOffset + dt * 0.012) % 1;
+    normal.vOffset = (normal.vOffset + dt * 0.006) % 1;
+    for (const key of this.facadeKeys) this.get(key).emissiveColor.setAll(0.12 + night * 1.4);
+    this.get("street-light").emissiveColor.copyFromFloats(1, 0.75, 0.4).scaleInPlace(0.25 + night * 2);
   }
 
   private surface(key: string, maps: SurfaceMaps, roughness: number, metallic: number): PBRMaterial {
