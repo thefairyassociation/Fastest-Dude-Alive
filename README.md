@@ -37,7 +37,7 @@ Story beats are authored as data in `src/game/story/script.ts`; the runner in `C
 
 ## Graphics: the resonance suit and Meridian
 
-Nolan now wears an authored **1.81 m athletic rig** with a sculpted torso, shaped thighs/calves, articulated boots and gloves, a continuous curved visor, and layered garnet/graphite/ivory armour. Woven fabric normals and ceramic/metal materials distinguish the suit layers. Amber inlays on the back, wrists and heels turn cold blue during focus. Actual animated limbs cast the character shadow.
+Nolan now wears an authored **1.80 m athletic rig** with a continuous crimson suit, flush graphite panels, shaped thighs/calves, fitted gloves, low running boots and a curved visor. Smooth body contours and subtle woven normals replace floating armour pieces; linear material colours keep the red from washing out toward pink. Amber inlays on the back, wrists and heels turn cold blue during focus. Actual animated limbs cast the character shadow.
 
 The title screen presents the playable character against the live city. The closer chase camera keeps the suit readable; smoother pose transitions, restrained bloom and age-faded wrist/heel ribbons carry the sense of speed. Reduced motion suppresses ribbons, afterimages, camera roll, speed zoom, chromatic aberration and storm flashes.
 

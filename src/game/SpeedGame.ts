@@ -11,6 +11,7 @@ import {
   Vector3,
 } from "@babylonjs/core";
 import { Input } from "./core/Input";
+import { constrainChaseCamera } from "./core/ChaseCamera";
 import { clamp, damp, mulberry32, type Rng } from "./core/Rng";
 import { Save, type Quality } from "./core/Save";
 import { createBestEngine } from "./core/engine";
@@ -757,12 +758,16 @@ export class SpeedGame {
   /* ------------------------------------------------------------------ */
 
   private resetChaseCamera(): void {
+    this.player.resetPresentation();
     this.cameraYaw = 0;
     this.cameraPitch = 0.16;
     this.cameraRoll = 0;
     this.shake = 0;
     this.camera.upVector.set(0, 1, 0);
     this.camera.position.copyFrom(this.player.position).addInPlaceFromFloats(0, 2.6, -4.4);
+    const anchor = this.player.position.add(new Vector3(0, 1.4, 0));
+    constrainChaseCamera(this.city.grid, anchor, this.camera.position, this.camera.position);
+    this.camera.setTarget(anchor.add(new Vector3(0, 0, 4)));
     this.camera.fov = 0.88;
   }
 
@@ -808,7 +813,7 @@ export class SpeedGame {
       .subtract(forward.scale(distance))
       .addInPlaceFromFloats(0, height, 0);
 
-    // Never let the camera sit inside a building.
+    // Keep above walkable surfaces; the sightline sweep below handles walls.
     const surface = this.city.groundHeight(desired.x, desired.z, desired.y) + 1.4;
     if (desired.y < surface) desired.y = surface;
 
@@ -824,6 +829,10 @@ export class SpeedGame {
         (Math.random() - 0.5) * amount,
       );
     }
+
+    // Constrain after smoothing and shake, so neither can re-enter a facade.
+    const anchor = player.position.add(new Vector3(0, 1.4, 0));
+    constrainChaseCamera(this.city.grid, anchor, this.camera.position, this.camera.position);
 
     // Roll the horizon during wall runs — the single clearest read that the
     // player is no longer on the ground.

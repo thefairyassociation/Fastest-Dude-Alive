@@ -6,6 +6,8 @@ import { HeroModel } from '../src/game/player/HeroModel.ts';
 import { SpeedTrails } from '../src/game/fx/SpeedTrails.ts';
 import { Palette } from '../src/game/world/Materials.ts';
 import { mulberry32 } from '../src/game/core/Rng.ts';
+import { constrainChaseCamera } from '../src/game/core/ChaseCamera.ts';
+import { CollisionGrid } from '../src/game/world/Collision.ts';
 
 // Real CPU canvas painting, with Babylon's non-GPU engine. This verifies
 // geometry/masks/state transitions, not shader output or visual appearance.
@@ -40,7 +42,7 @@ test('hero mesh has finite geometry, outward normals and human-scale proportions
     const torso = scene.getMeshByName('hero-anatomical-torso');
     const p = torso.getVerticesData(VertexBuffer.PositionKind), n = torso.getVerticesData(VertexBuffer.NormalKind);
     // Sample a side wall away from end caps. Inward normals invert lighting.
-    const ring = 4, i = ring * 25 * 3;
+    const ring = 4, i = ring * 33 * 3;
     assert.ok(p[i] * n[i] + p[i + 2] * n[i + 2] > 0, 'torso normals face out');
     const bounds = hero.root.getHierarchyBoundingVectors();
     assert.ok(bounds.max.y > 1.75 && bounds.max.y < 1.9, `height ${bounds.max.y}`);
@@ -206,4 +208,84 @@ test('effect resets clear the previous run and Low allocates only two ribbons', 
     assert.ok(scene.meshes.some(m => m.name.startsWith('pulse-cool') && m.isEnabled()), 'pools remain reusable after reset');
     effects.setReducedMotion(true);
   } finally { engine.dispose(); }
+});
+
+test('refined suit stays continuous, uses linear colours and keeps the idle arms outside the torso', () => {
+  const { engine, scene } = setup();
+  try {
+    const hero = new HeroModel(scene);
+    for (let i = 0; i < 120; i++) hero.pose(idle);
+    const torso = scene.getMeshByName('hero-anatomical-torso');
+    assert.equal(torso.material.name, 'hero-suit', 'the complete torso is red, not disconnected red overlays on a dark core');
+    assert.equal(scene.getMeshByName('hero-abdominal-0'), null, 'no floating abdominal discs');
+    const colour = torso.material.albedoColor;
+    assert.ok(colour.r > 0.2 && colour.r < 0.25 && colour.g < 0.02, 'sRGB suit swatches are converted to linear PBR uniforms');
+    for (const side of [-1, 1]) {
+      const shoulder = scene.getTransformNodeByName(`hero-shoulder-${side}`);
+      const elbow = scene.getTransformNodeByName(`hero-elbow-${side}`);
+      shoulder.computeWorldMatrix(true); elbow.computeWorldMatrix(true);
+      assert.ok(side * (elbow.getAbsolutePosition().x - shoulder.getAbsolutePosition().x) > 0, 'relaxed arms angle away from the body');
+      const boot = scene.getMeshByName(`hero-boot-${side}`);
+      const p = boot.getVerticesData(VertexBuffer.PositionKind);
+      let maxToeY = -Infinity;
+      for (let i = 0; i < p.length; i += 3) if (p[i + 2] > 0.12) maxToeY = Math.max(maxToeY, p[i + 1]);
+      assert.ok(Number.isFinite(maxToeY) && maxToeY < 0.012, 'toe box stays low instead of swelling into a sphere');
+    }
+    const normals = torso.getVerticesData(VertexBuffer.NormalKind);
+    // Every radial ring duplicates the first vertex for UV wrapping. The two
+    // normals must agree or a visible lighting seam runs down the front.
+    const radialVertices = 33, rows = 36;
+    for (let row = 0; row < rows; row++) {
+      const start = row * radialVertices * 3, end = start + 32 * 3;
+      for (let axis = 0; axis < 3; axis++) assert.ok(Math.abs(normals[start + axis] - normals[end + axis]) < 1e-6);
+    }
+  } finally { engine.dispose(); }
+});
+
+test('play-start presentation reset clears portrait yaw and slide/wall pose before movement', async () => {
+  const { Player } = await import('../src/game/player/Player.ts');
+  const { engine, scene } = setup();
+  try {
+    const player = new Player(scene, Vector3.Zero());
+    for (const state of [{}, { sliding: true }, { wallSide: 1, grounded: false }]) {
+      player.root.rotation.y = -0.25;
+      player.previousYaw = 2;
+      player.lastTurn = 0.7;
+      for (let frame = 0; frame < 120; frame++) player.model.pose({ ...idle, ...state });
+      player.teleport(new Vector3(5, 0, 5));
+      player.resetPresentation();
+      assert.equal(player.root.rotation.y, 0);
+      assert.equal(player.previousYaw, 0);
+      assert.equal(player.lastTurn, 0);
+      assert.equal(player.model.shadowCaster.position.y, 0);
+      assert.equal(player.model.shadowCaster.rotation.z, 0);
+      player.velocity.set(0, 0, 1);
+      player.updateFacing(1 / 60);
+      assert.equal(player.root.rotation.y, 0, 'first movement does not snap away from portrait yaw');
+      assert.equal(player.lastTurn, 0, 'first movement does not inherit artificial banking');
+    }
+  } finally { engine.dispose(); }
+});
+
+test('chase sightline pulls in before thin walls, diagonal approaches and overhead solids', () => {
+  const grid = new CollisionGrid();
+  grid.add({ minX: -10, maxX: 10, minZ: -3, maxZ: -2.9, bottom: 0, top: 30, climbable: true });
+  const anchor = new Vector3(0, 1.4, 0), camera = new Vector3(0, 2.6, -4.4);
+  // Endpoint is outside the thin wall: only a segment sweep detects it.
+  constrainChaseCamera(grid, anchor, camera, camera);
+  assert.ok(camera.z > -2.7 && camera.z < -2.6);
+  assert.ok(!grid.overlaps(camera.x, camera.z, 0.2, camera.y - 0.2, camera.y + 0.2, 0));
+  for (const desired of [new Vector3(2, 3, -8), new Vector3(-2, 6, -8)]) {
+    constrainChaseCamera(grid, anchor, desired, camera);
+    assert.ok(camera.z > -2.7, 'diagonal/raised chase stays on the near side');
+  }
+  const above = new Vector3(0, 40, -8), highAnchor = new Vector3(0, 35, 0);
+  constrainChaseCamera(grid, highAnchor, above, camera);
+  assert.deepEqual(camera.asArray(), above.asArray(), 'rooftop sightlines above a building remain clear');
+  const bridge = new CollisionGrid();
+  bridge.add({ minX: -10, maxX: 10, minZ: -10, maxZ: 10, bottom: 3, top: 4, climbable: false });
+  constrainChaseCamera(bridge, anchor, new Vector3(0, 6, -4), camera);
+  assert.ok(camera.y < 2.8 && camera.y > 2.7, 'camera stays below bridge underside');
+  constrainChaseCamera(new CollisionGrid(), anchor, above, camera);
+  assert.deepEqual(camera.asArray(), above.asArray(), 'unobstructed sightline is unchanged');
 });

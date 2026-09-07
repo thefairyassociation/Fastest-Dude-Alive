@@ -33,7 +33,7 @@ There is currently no other binary asset in the repository.
 
 | Category | Status |
 | --- | --- |
-| 3D models | No binary models. Character body sections, curved visor, layered suit and world meshes are authored in source and built at runtime — see `src/game/world/Landmarks.ts` and `src/game/player/HeroModel.ts`. |
+| 3D models | No binary models. Character body sections, fitted visor, continuous suit and contour-following panels and world meshes are authored in source and built at runtime — see `src/game/world/Landmarks.ts` and `src/game/player/HeroModel.ts`. |
 | Textures | None. Facades, roads, sidewalks, grass, water, metal, sky gradients, sprites, window-emission/roughness masks, suit weave and normal maps are all painted into canvases at boot in `src/game/world/Textures.ts`. |
 | Environment maps | None. Image-based lighting comes from a cube painted from the active sky gradient in `src/game/world/Sky.ts`. |
 | Audio | None yet. When audio arrives it belongs in Git LFS with rows in this table. |
@@ -51,6 +51,6 @@ Runtime dependencies are listed in `package.json` and pinned by `package-lock.js
 
 ### Graphics overhaul provenance
 
-The new body profiles, suit plates, helmet, visor, resonance inlays and speed-ribbon geometry in `HeroModel.ts` and `SpeedTrails.ts` were authored for this repository and use its MIT licence. No downloaded character models, texture packs or third-party character designs were incorporated.
+The new body profiles, surface panels, running boots, helmet, visor, resonance inlays and speed-ribbon geometry in `HeroModel.ts` and `SpeedTrails.ts` were authored for this repository and use its MIT licence. No downloaded character models, texture packs or third-party character designs were incorporated.
 
 `@napi-rs/canvas` 1.0.8 is a pinned MIT-licensed **development-only** dependency for CPU texture tests. It and its platform binaries are not imported by the game or shipped in the production bundle.

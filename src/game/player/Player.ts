@@ -625,6 +625,15 @@ export class Player {
     return true;
   }
 
+  /** Start play with no title portrait heading or previous traversal pose. */
+  resetPresentation(): void {
+    this.root.rotation.setAll(0);
+    this.previousYaw = 0;
+    this.lastTurn = 0;
+    this.heading.set(0, 0, 1);
+    this.model.resetPose();
+  }
+
   teleport(position: Vector3): void {
     this.root.position.copyFrom(position);
     this.velocity.setAll(0);
