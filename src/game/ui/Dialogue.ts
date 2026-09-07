@@ -18,6 +18,8 @@ export class Dialogue implements DialogueView {
   private readonly text = element("dialogue-text");
   private readonly hint = element("dialogue-hint");
   private readonly choiceBox = element("dialogue-choices");
+  private readonly count = element("dialogue-count");
+  private readonly advanceButton = element("dialogue-advance");
 
   private lines: Line[] = [];
   private index = 0;
@@ -25,7 +27,22 @@ export class Dialogue implements DialogueView {
   private highlighted = 0;
   private resolved: string | null = null;
 
-  constructor(private readonly input: Input) {}
+  constructor(private readonly input: Input) {
+    this.advanceButton.addEventListener("click", () => {
+      if (!this.active) return;
+      this.advance();
+      this.input.discard("advance");
+    });
+    // A focused native button must not also feed the gameplay advance edge.
+    this.advanceButton.addEventListener("keydown", (event) => {
+      if (event.code !== "Space" && event.code !== "Enter") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) return;
+      this.advance();
+      this.input.discard("advance");
+    });
+  }
 
   get active(): boolean {
     return this.lines.length > 0 || this.options !== null;
@@ -59,7 +76,8 @@ export class Dialogue implements DialogueView {
     this.name.textContent = "Meridian City";
     this.role.textContent = "";
     this.text.textContent = prompt;
-    this.hint.textContent = "A / D to choose · Space to confirm";
+    this.hint.textContent = "A / D to choose · Space / A to confirm";
+    this.count.textContent = "Your decision";
 
     this.choiceBox.replaceChildren();
     options.forEach((option, index) => {
@@ -67,6 +85,19 @@ export class Dialogue implements DialogueView {
       button.type = "button";
       button.className = "choice-button";
       button.textContent = option.label;
+      button.addEventListener("focus", () => {
+        this.highlighted = index;
+        this.highlight();
+      });
+      button.addEventListener("keydown", (event) => {
+        if (event.code !== "Space" && event.code !== "Enter") return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.repeat) return;
+        this.highlighted = index;
+        this.confirmChoice();
+        this.input.discard("advance");
+      });
       button.addEventListener("click", () => {
         this.highlighted = index;
         this.confirmChoice();
@@ -131,6 +162,7 @@ export class Dialogue implements DialogueView {
     const buttons = this.choiceBox.querySelectorAll(".choice-button");
     buttons.forEach((button, index) => {
       button.classList.toggle("selected", index === this.highlighted);
+      button.setAttribute("aria-pressed", String(index === this.highlighted));
     });
   }
 
@@ -156,8 +188,9 @@ export class Dialogue implements DialogueView {
     }
 
     this.text.textContent = line.text;
+    this.count.textContent = `${String(this.index + 1).padStart(2, "0")} / ${String(this.lines.length).padStart(2, "0")}`;
     this.hint.textContent =
-      this.index >= this.lines.length - 1 ? "Space to close" : "Space to continue";
+      this.index >= this.lines.length - 1 ? "Space / A to close" : "Space / A to continue";
   }
 }
 

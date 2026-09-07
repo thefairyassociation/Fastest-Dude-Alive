@@ -3,6 +3,7 @@ import { approach, clamp, damp } from "../core/Rng";
 import type { Input } from "../core/Input";
 import type { City, MoveResult } from "../world/City";
 import { HeroModel } from "./HeroModel";
+import { COYOTE_SECONDS, JUMP_BUFFER_SECONDS, timeToLanding, turnHeading } from "./Traversal";
 
 /**
  * The speed controller.
@@ -20,6 +21,7 @@ const ABSOLUTE_TOP = 280;
 const RUN_ACCEL = 62;
 const SPRINT_ACCEL = 58;
 const BRAKE = 46;
+const COUNTERSTEER_BRAKE = 145;
 
 const GRAVITY = 24;
 const WALL_GRAVITY = 5.5;
@@ -71,6 +73,8 @@ export class Player {
   /** Metres travelled this session, for the profile. */
   distance = 0;
   focusHeld = false;
+  /** True while opposite steering is actively scrubbing forward speed. */
+  braking = false;
 
   private readonly move: MoveResult = {
     grounded: true,
@@ -100,6 +104,9 @@ export class Player {
   private dashTimer = 0;
   private airDashAvailable = true;
   private coyote = 0;
+  private jumpBuffer = 0;
+  private slideReady = true;
+  private slideCooldown = 0;
   private wallTimer = 0;
   private wallCooldown = 0;
   private climbSpeed = 0;
@@ -162,16 +169,21 @@ export class Player {
       cos * movement.z - sin * movement.x,
     );
     const hasInput = desired.lengthSquared() > 0.001;
+    const inputStrength = Math.min(1, desired.length());
     if (hasInput) desired.normalize();
 
     const sprinting = input.down("sprint");
     const wantsJump = input.consume("jump");
     const wantsSlide = input.down("slide");
+    if (wantsJump) this.jumpBuffer = JUMP_BUFFER_SECONDS;
+    else this.jumpBuffer = Math.max(0, this.jumpBuffer - dt);
+    if (!wantsSlide) this.slideReady = true;
+    this.braking = false;
 
     switch (this.state) {
       case "ground":
       case "slide":
-        this.updateGrounded(dt, city, desired, hasInput, sprinting, wantsJump, wantsSlide);
+        this.updateGrounded(dt, city, desired, hasInput, inputStrength, sprinting, this.jumpBuffer > 0, wantsSlide);
         break;
       case "air":
         this.updateAir(dt, city, desired, hasInput, wantsJump);
@@ -185,6 +197,8 @@ export class Player {
     }
 
     this.integrate(dt, city);
+    // Consume on the landing step, so a 120 Hz boundary cannot eat a jump.
+    if (this.grounded && this.jumpBuffer > 0) this.launch(this.speed);
     this.updateFacing(dt);
     this.animate(dt);
     return this.events;
@@ -201,6 +215,8 @@ export class Player {
     this.resetEvents();
     this.tickResources(dt);
     this.focusHeld = false;
+    this.braking = false;
+    this.jumpBuffer = 0;
 
     if (this.state === "wall" || this.state === "vertical") this.detachWall(0.2);
     this.setHorizontalSpeed(approach(this.speed, 0, BRAKE * 1.6 * dt));
@@ -221,6 +237,7 @@ export class Player {
     city: City,
     desired: Vector3,
     hasInput: boolean,
+    inputStrength: number,
     sprinting: boolean,
     wantsJump: boolean,
     wantsSlide: boolean,
@@ -229,27 +246,33 @@ export class Player {
     let speed = this.speed;
 
     if (sliding) {
-      // Slides trade control for a low-friction carry through corners.
+      // Lower friction preserves speed, while deliberate steering shapes a drift.
       this.slideTimer += dt;
       speed = approach(speed, 0, 14 * dt);
       if (!wantsSlide || speed < 9 || this.slideTimer > 3.2) {
         this.state = "ground";
         this.slideTimer = 0;
       }
-      if (hasInput) this.steer(desired, speed, dt, 0.35);
+      if (hasInput) this.steer(desired, speed, dt, 0.55);
     } else {
       if (hasInput) {
-        const target = sprinting ? SPRINT_TOP : RUN_TOP;
+        const target = (sprinting ? SPRINT_TOP : RUN_TOP) * inputStrength;
         const accel = sprinting ? SPRINT_ACCEL : RUN_ACCEL;
-        speed = approach(speed, target, accel * dt);
-        this.steer(desired, speed, dt, 1);
+        const alignment = speed > 0.1 ? (this.velocity.x * desired.x + this.velocity.z * desired.z) / speed : 1;
+        // Opposite input brakes first. The previous normalized lerp could
+        // never turn through exactly 180°, leaving S accelerating forwards.
+        this.braking = alignment < -0.35 && speed > 12;
+        speed = approach(speed, this.braking ? 0 : target, (this.braking ? COUNTERSTEER_BRAKE : accel) * dt);
+        this.steer(desired, speed, dt, this.braking ? 0.38 : 1);
       } else {
         speed = approach(speed, 0, BRAKE * dt);
       }
 
-      if (wantsSlide && speed > 20) {
+      if (wantsSlide && this.slideReady && this.slideCooldown <= 0 && speed > 20) {
         this.state = "slide";
         this.slideTimer = 0;
+        this.slideReady = false;
+        this.slideCooldown = 0.9;
         // A slide entered at pace pays for itself once.
         speed = Math.min(ABSOLUTE_TOP, speed * 1.08);
       }
@@ -265,7 +288,7 @@ export class Player {
     // Running flat into a facade fast enough converts speed into altitude.
     if (!sliding && speed > 48 && this.tryVerticalRun(city)) return;
 
-    this.coyote = 0.12;
+    this.coyote = COYOTE_SECONDS;
   }
 
   private updateAir(dt: number, city: City, desired: Vector3, hasInput: boolean, wantsJump: boolean): void {
@@ -276,7 +299,9 @@ export class Player {
         this.launch(this.speed);
         return;
       }
-      if (this.airDashAvailable && this.charge >= 18 && this.dashCooldown <= 0) {
+      // Close to a landing, Space means the next jump. Everywhere else it
+      // retains its existing instant air-dash meaning.
+      if (!this.landingSoon(city) && this.airDashAvailable && this.charge >= 18 && this.dashCooldown <= 0) {
         this.airDash(desired, hasInput);
         return;
       }
@@ -308,6 +333,7 @@ export class Player {
       this.velocity.z += this.wallNormal.z * 26;
       this.velocity.y = 13;
       this.detachWall(0.35);
+      this.jumpBuffer = 0;
       this.events.wallJumped = true;
       this.charge = Math.min(100, this.charge + 4);
       return;
@@ -345,6 +371,7 @@ export class Player {
     if (wantsJump) {
       this.velocity.set(this.wallNormal.x * 30, Math.max(12, this.climbSpeed * 0.4), this.wallNormal.z * 30);
       this.detachWall(0.35);
+      this.jumpBuffer = 0;
       this.events.wallJumped = true;
       return;
     }
@@ -365,14 +392,25 @@ export class Player {
     const normalized = Math.min(1, speed / SPRINT_TOP);
     // Turning gets heavier the faster you go; that is the whole handling model.
     const turnRate = (10.5 - normalized * 7.6) * authority;
-    const blend = damp(turnRate, dt);
-    const dirX = speed > 0.1 ? this.velocity.x / speed : desired.x;
-    const dirZ = speed > 0.1 ? this.velocity.z / speed : desired.z;
-    const newX = dirX + (desired.x - dirX) * blend;
-    const newZ = dirZ + (desired.z - dirZ) * blend;
-    const length = Math.hypot(newX, newZ) || 1;
-    this.velocity.x = (newX / length) * speed;
-    this.velocity.z = (newZ / length) * speed;
+    const currentSpeed = this.speed;
+    const target = Math.atan2(desired.x, desired.z);
+    const current = currentSpeed > 0.1 ? Math.atan2(this.velocity.x, this.velocity.z) : target;
+    let difference = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+    // Keep small corrections soft, but cap the angular rate at fast corners.
+    difference *= damp(turnRate, dt);
+    const yaw = turnHeading(current, current + difference, turnRate * dt);
+    this.velocity.x = Math.sin(yaw) * speed;
+    this.velocity.z = Math.cos(yaw) * speed;
+  }
+
+  private landingSoon(city: City): boolean {
+    if (this.velocity.y > 0) return false;
+    const position = this.root.position;
+    const ground = city.groundHeight(position.x, position.z, position.y + STEP_HEIGHT);
+    const time = timeToLanding(position.y - ground, this.velocity.y, GRAVITY);
+    if (time > JUMP_BUFFER_SECONDS) return false;
+    const nextGround = city.groundHeight(position.x + this.velocity.x * time, position.z + this.velocity.z * time, position.y + STEP_HEIGHT);
+    return timeToLanding(position.y - nextGround, this.velocity.y, GRAVITY) <= JUMP_BUFFER_SECONDS;
   }
 
   private setHorizontalSpeed(speed: number): void {
@@ -392,6 +430,7 @@ export class Player {
     this.velocity.y = 8.5 + Math.min(1, speed / SPRINT_TOP) * 8;
     this.state = "air";
     this.coyote = 0;
+    this.jumpBuffer = 0;
     this.airDashAvailable = true;
     this.events.jumped = true;
   }
@@ -401,6 +440,7 @@ export class Player {
     this.dashCooldown = 0.7;
     this.dashTimer = 0.18;
     this.airDashAvailable = false;
+    this.jumpBuffer = 0;
     this.invulnerable = Math.max(this.invulnerable, 0.3);
 
     const dirX = hasInput ? desired.x : this.heading.x;
@@ -456,12 +496,14 @@ export class Player {
     this.wallSide = 0;
     this.wallCooldown = cooldown;
     this.climbSpeed = 0;
+    this.coyote = 0;
   }
 
   /* ---------------- integration ---------------- */
 
   private integrate(dt: number, city: City): void {
-    const before = this.root.position.clone();
+    const beforeX = this.root.position.x;
+    const beforeZ = this.root.position.z;
     const previousY = this.root.position.y;
     const falling = this.velocity.y < -6;
 
@@ -495,7 +537,7 @@ export class Player {
     } else if (this.state === "ground" || this.state === "slide") {
       // Ran off an edge.
       this.state = "air";
-      this.coyote = 0.12;
+      this.coyote = COYOTE_SECONDS;
     }
 
     // Head-on impact into a facade scrubs speed instead of stopping dead.
@@ -513,13 +555,14 @@ export class Player {
         if (this.sinkTimer > 0.45) {
           this.events.sank = true;
           this.recover(city);
+          return; // Recovery is a teleport, not distance run for the profile.
         }
       }
     } else {
       this.sinkTimer = 0;
     }
 
-    this.distance += Vector3.Distance(before, this.root.position);
+    this.distance += Math.hypot(this.root.position.x - beforeX, this.root.position.y - previousY, this.root.position.z - beforeZ);
   }
 
   private updateFacing(dt: number): void {
@@ -640,6 +683,18 @@ export class Player {
     this.state = "ground";
     this.climbSpeed = 0;
     this.sinkTimer = 0;
+    this.wallTimer = 0;
+    this.wallCooldown = 0;
+    this.wallSide = 0;
+    this.coyote = 0;
+    this.jumpBuffer = 0;
+    this.slideTimer = 0;
+    this.slideReady = true;
+    this.slideCooldown = 0;
+    this.dashTimer = 0;
+    this.airDashAvailable = true;
+    this.braking = false;
+    this.focusHeld = false;
   }
 
   recover(city: City): void {
@@ -670,6 +725,7 @@ export class Player {
     this.dashTimer = Math.max(0, this.dashTimer - dt);
     this.comboTimer = Math.max(0, this.comboTimer - dt);
     this.wallCooldown = Math.max(0, this.wallCooldown - dt);
+    this.slideCooldown = Math.max(0, this.slideCooldown - dt);
     this.secondsSinceDamage += dt;
 
     if (this.comboTimer <= 0) this.combo = 1;

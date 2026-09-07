@@ -15,6 +15,9 @@ import { constrainChaseCamera } from "./core/ChaseCamera";
 import { clamp, damp, mulberry32, type Rng } from "./core/Rng";
 import { Save, type Quality } from "./core/Save";
 import { createBestEngine } from "./core/engine";
+import { CityLife } from "./world/CityLife";
+import { Soundscape } from "./audio/Soundscape";
+import { RouteGhost } from "./fx/RouteGhost";
 import { City } from "./world/City";
 import { Player } from "./player/Player";
 import { Effects } from "./fx/Effects";
@@ -54,6 +57,9 @@ export class SpeedGame {
 
   private scene!: Scene;
   private city!: City;
+  private cityLife!: CityLife;
+  private readonly sound = new Soundscape();
+  private routeGhost!: RouteGhost;
   private player!: Player;
   private camera!: FreeCamera;
   private pipeline!: DefaultRenderingPipeline;
@@ -72,6 +78,7 @@ export class SpeedGame {
   private bystandersInUse = 0;
 
   private available: Activity[] = [];
+  private activitySites: NonNullable<HudState["activitySites"]> = [];
   private activity: Activity | null = null;
   private campaign: Campaign | null = null;
   private chapter: Chapter | null = null;
@@ -115,8 +122,10 @@ export class SpeedGame {
 
     const quality = this.save.settings.quality;
 
-    say("Laying out 3.7 km of Meridian City…");
+    say("Opening the boroughs of Meridian…");
     this.city = new City(this.scene, quality);
+    this.cityLife = new CityLife(this.scene, this.city, quality);
+    this.routeGhost = new RouteGhost(this.scene);
 
     say("Suiting up…");
     this.player = new Player(this.scene, this.city.start);
@@ -141,7 +150,7 @@ export class SpeedGame {
     this.heroFill.range = 12;
     this.heroFill.includedOnlyMeshes = this.player.root.getChildMeshes();
 
-    this.hud = new Hud(this.city);
+    this.hud = new Hud(this.city, () => this.toggleMap());
     this.hud.setRenderer(renderer);
     this.dialogue = new Dialogue(this.input);
     this.menu = new Menu(this.save, {
@@ -156,6 +165,7 @@ export class SpeedGame {
 
     this.world = this.createWorld();
     this.available = this.buildFreeRoamActivities();
+    this.activitySites = this.available.map(activity => ({ name: activity.name, position: activity.anchor, kind: activity instanceof RouteRun ? "route" : activity instanceof RescueRun ? "rescue" : "duel" }));
     this.applySettings();
 
     this.wireGlobalInput();
@@ -214,9 +224,12 @@ export class SpeedGame {
     engine.runRenderLoop(() => {
       const frameDt = Math.min(0.05, engine.getDeltaTime() / 1000);
 
+      const gamepadMap = this.input.pollMap();
+      if (gamepadMap && this.mode !== "menu" && !this.menu.resultsVisible && (!this.paused || this.hud.isMapOpen)) this.toggleMap();
       const gamepadPause = this.input.pollPause();
       if (gamepadPause && this.mode !== "menu" && !this.menu.resultsVisible) {
-        if (this.paused) this.resume();
+        if (this.hud.isMapOpen) this.toggleMap();
+        else if (this.paused) this.resume();
         else this.pauseGame();
       }
 
@@ -228,6 +241,7 @@ export class SpeedGame {
           this.fixedUpdate(STEP);
           this.accumulator -= STEP;
           steps += 1;
+          if (this.paused) { this.accumulator = 0; break; }
         }
         this.updateCamera(frameDt);
         this.effects.update(frameDt, this.player, this.focusActive);
@@ -235,10 +249,14 @@ export class SpeedGame {
         this.city.sky.update(frameDt);
         this.city.palette.update(frameDt, this.city.sky.nightAmount);
         this.city.updateStreaming(this.player.position);
+        this.cityLife.update(frameDt, this.player.position, this.focusActive ? 0.16 : 1);
+        this.routeGhost.update(this.activity instanceof RouteRun ? this.activity.replayPose() : null, this.player.position, !this.save.settings.reducedMotion);
+        this.sound.update(frameDt, this.player.speedRatio, this.focusActive, this.city.sky.nightAmount);
         this.scene.imageProcessingConfiguration.exposure = this.city.sky.exposure;
         this.hud.update(frameDt, this.player, this.hudState());
       }
 
+      this.sound.setPaused(this.paused || this.dialogue.active || document.hidden);
       if (this.mode === "menu") this.updateShowcase(frameDt);
       this.heroFill.position.copyFrom(this.camera.position);
       this.scene.render();
@@ -246,17 +264,36 @@ export class SpeedGame {
   }
 
   private wireGlobalInput(): void {
+    window.addEventListener("blur", () => {
+      if (this.mode !== "menu" && !this.paused && !this.menu.resultsVisible) this.pauseGame();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) {
+        this.sound.setPaused(true);
+        if (this.mode !== "menu" && !this.paused && !this.menu.resultsVisible) this.pauseGame();
+        this.save.flush();
+      }
+    });
+    window.addEventListener("pagehide", () => this.save.flush());
     this.canvas.addEventListener("click", () => {
       if (this.mode !== "menu" && !this.paused && !this.dialogue.active) {
         this.input.requestPointerLock();
+        void this.sound.unlock();
       }
     });
 
     window.addEventListener("keydown", (event) => {
+      if (event.repeat) return;
+      if (event.code === "KeyM" && this.hud.isMapOpen) {
+        event.preventDefault();
+        this.toggleMap();
+        return;
+      }
       if (event.code === "Escape") {
         if (this.mode === "menu") return;
         if (this.menu.resultsVisible) return;
-        if (this.paused) this.resume();
+        if (this.hud.isMapOpen) this.toggleMap();
+        else if (this.paused) this.resume();
         else this.pauseGame();
       }
     });
@@ -310,6 +347,10 @@ export class SpeedGame {
         70,
         340,
       ),
+      new RescueRun("rescue-northline", "Last Train Out", this.city.landmark("northline-station").position.clone(), 8, 75, 400),
+      new RescueRun("rescue-westhaven", "Reservoir Evacuation", this.city.landmark("westhaven-reservoir").position.clone(), 9, 80, 420),
+      new RescueRun("rescue-foundry", "Shift Change", this.city.landmark("foundry-exchange").position.clone(), 8, 70, 360),
+      new RescueRun("rescue-saltmere", "The Stranded Ferry", this.city.landmark("saltmere-terminal").position.clone(), 7, 65, 320),
       new RescueRun(
         "rescue-docks",
         "Container Stack Failure",
@@ -328,6 +369,7 @@ export class SpeedGame {
       ["coldsnap", "ridgeline-transit"],
       ["ricochet", "kestrel-bridge"],
       ["hollow", "corbin-green"],
+      ["vantage", "beacon-point"],
     ];
     for (const [rogue, landmark] of duelSpots) {
       activities.push(new RogueDuel(rogue, this.city.landmark(landmark).position.clone()));
@@ -339,6 +381,8 @@ export class SpeedGame {
   private applySettings(): void {
     const settings = this.save.settings;
     this.input.lookSensitivity = settings.lookSensitivity;
+    this.sound.setVolume(settings.muted ? 0 : settings.masterVolume);
+    this.cityLife.setQuality(settings.quality);
     this.effects.setReducedMotion(settings.reducedMotion);
     this.city.sky.setReducedMotion(settings.reducedMotion);
     document.documentElement.classList.toggle("reduced-motion", settings.reducedMotion);
@@ -353,6 +397,7 @@ export class SpeedGame {
 
   private startFreeRoam(): void {
     this.teardownRun();
+    this.collectibles.syncFromSave();
     this.mode = "free";
     this.chapter = null;
     this.city.sky.setAtmosphere("golden", true);
@@ -368,11 +413,12 @@ export class SpeedGame {
 
   private startChapter(chapter: Chapter): void {
     this.teardownRun();
+    this.collectibles.syncFromSave();
     this.mode = "story";
     this.chapter = chapter;
     this.player.health = 100;
     this.player.charge = 60;
-    this.campaign = new Campaign(chapter, this.world, this.dialogue);
+    this.campaign = new Campaign(chapter, this.world, this.dialogue, this.save.data.campaign.choices);
     this.campaign.start();
     this.resetChaseCamera();
     this.input.releaseAll();
@@ -397,6 +443,7 @@ export class SpeedGame {
 
   private returnToMenu(): void {
     this.teardownRun();
+    this.collectibles.syncFromSave();
     this.mode = "menu";
     this.paused = true;
     this.hud.setVisible(false);
@@ -413,6 +460,7 @@ export class SpeedGame {
   }
 
   private teardownRun(): void {
+    this.trackProfile(2);
     this.activity?.stop(this.world);
     this.activity = null;
     this.campaign?.stop();
@@ -421,20 +469,43 @@ export class SpeedGame {
     this.world.releaseBystanders();
     this.markers.clear();
     this.effects.reset();
+    this.routeGhost.update(null, this.player.position, false);
     this.focusActive = false;
     this.dialogue.hide();
+    this.peakSpeed = 0;
     this.accumulator = 0;
+  }
+
+  private toggleMap(): void {
+    if (this.mode === "menu" || this.menu.resultsVisible) return;
+    if (this.hud.isMapOpen) {
+      this.hud.closeMap();
+      this.resume();
+      return;
+    }
+    if (this.paused) return;
+    this.hud.update(0, this.player, this.hudState());
+    this.hud.toggleMap();
+    this.paused = true;
+    this.accumulator = 0;
+    this.sound.setPaused(true);
+    this.input.setEnabled(false);
+    this.input.releasePointerLock();
   }
 
   private pauseGame(): void {
     if (this.mode === "menu") return;
     this.paused = true;
+    this.sound.setPaused(true);
     this.input.setEnabled(false);
     this.input.releasePointerLock();
     this.menu.showPause(this.chapter ? this.chapter.title : "Meridian City");
   }
 
   private resume(): void {
+    void this.sound.unlock();
+    this.sound.setPaused(false);
+    this.hud.closeMap();
     this.menu.hidePause();
     this.menu.hideResults();
     this.paused = false;
@@ -472,7 +543,8 @@ export class SpeedGame {
     this.input.poll();
     const talking = this.dialogue.active;
 
-    if (this.input.consume("map")) this.hud.toggleMap();
+    if (this.input.consume("map")) { this.toggleMap(); return; }
+    if (this.activity instanceof RouteRun && this.input.peek("recover")) this.activity.invalidateReplay();
     if (talking) {
       // The dialogue shares its advance key with jump, so the player must not
       // read input at all while a conversation is up — it would eat the press.
@@ -493,6 +565,7 @@ export class SpeedGame {
     if (this.collectibles.update(dt, this.player.position, this.effects)) {
       this.hud.toast(`Resonance mote · ${this.collectibles.found}/${this.collectibles.total}`);
       this.player.charge = Math.min(100, this.player.charge + 8);
+      this.sound.play("pickup");
     }
 
     if (this.mode === "story") this.updateStory(dt);
@@ -511,6 +584,7 @@ export class SpeedGame {
     if (result === "complete") {
       const chapter = campaign.chapter;
       const index = CHAPTERS.indexOf(chapter);
+      if (campaign.choice !== null) this.save.update(profile => { profile.campaign.choices[chapter.id] = campaign.choice!; });
       this.save.completeChapter(chapter.id, index);
       const next = CHAPTERS[index + 1];
       campaign.stop();
@@ -524,7 +598,7 @@ export class SpeedGame {
         chapter.title,
         next
           ? `${chapter.subtitle}. Next: ${next.title} — ${next.subtitle}.`
-          : "That is the end of the campaign as written. Free roam keeps the city open.",
+          : "Every address is back on the map. Meridian is yours to explore.",
         next ? "Next chapter" : "Back to menu",
       );
     } else if (result === "failed") {
@@ -566,10 +640,12 @@ export class SpeedGame {
     const result = activity.update(dt, this.world);
     if (result === "complete") {
       this.hud.toast(activity.successMessage());
+      this.sound.play("success");
       activity.stop(this.world);
       this.activity = null;
     } else if (result === "failed") {
       this.hud.toast(`${activity.name} failed`);
+      this.sound.play("failure");
       activity.stop(this.world);
       this.activity = null;
     }
@@ -602,20 +678,24 @@ export class SpeedGame {
   private handlePlayerEvents(events: ReturnType<Player["update"]>): void {
     const position = this.player.position;
     if (events.landed) {
+      this.sound.play("land");
       this.effects.burst(position, 14, "pale");
       this.shake = Math.max(this.shake, 0.35);
     }
-    if (events.jumped) this.effects.pulse(position, "pale", 4, 0.3);
+    if (events.jumped) { this.effects.pulse(position, "pale", 4, 0.3); this.sound.play("jump"); }
     if (events.wallJumped) {
+      this.sound.play("jump");
       this.effects.pulse(position, "cool", 6, 0.3);
       this.effects.burst(position, 12, "cool");
     }
     if (events.dashed) {
+      this.sound.play("dash");
       this.effects.pulse(position, "warm", 9, 0.32);
       this.shake = Math.max(this.shake, 0.5);
     }
+    if (events.footstep) this.sound.play("step");
     if (events.footstep && this.player.speed > 60) this.effects.burst(position, 4, "pale");
-    if (events.waterSpray) this.effects.burst(position, 6, "cool");
+    if (events.waterSpray) { this.effects.burst(position, 6, "cool"); this.sound.play("water"); }
     if (events.sank) this.hud.toast("Too slow across the river");
     if (events.struck) this.hud.flashAbility("ability-dash");
   }
@@ -642,6 +722,7 @@ export class SpeedGame {
 
     if (this.input.consume("strike") && player.canStrike()) {
       player.useStrike();
+      this.sound.play("strike");
       const target = this.findTarget(14, -0.3);
       if (target) {
         const accepted = target.vulnerable;
@@ -660,6 +741,7 @@ export class SpeedGame {
       const target = this.findTarget(120, 0.1);
       if (target) {
         player.useBolt();
+        this.sound.play("bolt");
         const from = position.add(new Vector3(0, 1.2, 0));
         this.effects.bolt(from, target.position.add(new Vector3(0, 1, 0)));
         const away = target.position.subtract(position).normalize();
@@ -674,6 +756,7 @@ export class SpeedGame {
 
     if (this.input.consume("pulse") && player.canPulse()) {
       player.usePulse();
+      this.sound.play("pulse");
       let hits = 0;
       for (const rogue of this.rogues) {
         if (!rogue.alive) continue;
@@ -792,12 +875,13 @@ export class SpeedGame {
     this.city.sky.update(dt);
     this.city.palette.update(dt, this.city.sky.nightAmount);
     this.city.updateStreaming(p);
+    this.cityLife.update(dt, p, 1);
     this.scene.imageProcessingConfiguration.exposure = this.city.sky.exposure;
   }
 
   private updateCamera(dt: number): void {
     if (!this.dialogue.active) {
-      const look = this.input.takeLook();
+      const look = this.input.takeLook(dt);
       this.cameraYaw -= look.x * 0.0022;
       this.cameraPitch = clamp(this.cameraPitch - look.y * 0.0017, -0.22, 0.5);
     }
@@ -875,6 +959,7 @@ export class SpeedGame {
     return {
       modeLabel: this.mode === "story" ? `Story · ${this.chapter?.title ?? ""}` : "Free roam",
       objective,
+      activitySites: this.mode === "free" ? this.activitySites : undefined,
       focusActive: this.focusActive,
       markers: this.currentMarkers(),
       rogue,
@@ -894,7 +979,7 @@ export class SpeedGame {
       const status = this.campaign.status();
       return {
         title: status.title,
-        detail: `${status.detail} · beat ${this.campaign.beatNumber}/${this.campaign.beatCount}`,
+        detail: `${status.detail} · objective ${this.campaign.beatNumber}/${this.campaign.beatCount}`,
         progress: status.progress,
         timer: status.timer,
       };

@@ -1,23 +1,18 @@
 import type { AtmosphereId } from "../world/Sky";
 
 /**
- * The campaign script.
+ * MINUTES OWED — fifteen playable chapters in three acts.
  *
- * Twelve chapters in three acts, authored as data so the runner in
- * `Campaign.ts` stays mechanical and the writing stays in one place. A beat is
- * either dialogue or an objective; objectives that need real gameplay
- * delegate to the same activity classes free roam uses.
- *
- * Chapters can be added, reordered or rewritten without touching the runner.
+ * Stable chapter ids deliberately retain their original spelling so existing
+ * saves keep their unlocked/completed chapters. Visible titles are the new story.
+ * Authored routes connect real places; branch beats add actual playable tasks.
  */
-
 export interface Line {
   /** Cast id, or "narration" for unattributed text. */
   who: string;
   text: string;
 }
 
-/** Anchors an objective somewhere in the world. */
 export type Anchor =
   | { at: "landmark"; id: string }
   | { at: "point"; x: number; z: number }
@@ -34,6 +29,8 @@ export type Objective =
       anchor: Anchor;
       gates: number;
       spread: number;
+      /** Authored stops take precedence over generated gates. */
+      stops?: Anchor[];
       minKph?: number;
       seconds?: number;
     }
@@ -42,7 +39,15 @@ export type Objective =
   | { kind: "survive"; title: string; detail: string; anchor: Anchor; rogue: string; seconds: number }
   | { kind: "investigate"; title: string; detail: string; anchor: Anchor; sites: number; spread: number }
   | { kind: "climb"; title: string; detail: string; anchor: Anchor; height: number }
-  | { kind: "choice"; title: string; detail: string; prompt: string; options: [ChoiceOption, ChoiceOption] };
+  | { kind: "choice"; title: string; detail: string; prompt: string; options: [ChoiceOption, ChoiceOption] }
+  | {
+      kind: "branch";
+      /** Omit to use the choice made earlier in this chapter. */
+      chapter?: string;
+      outcomes: Record<string, Objective[]>;
+      /** Also used when an older profile has no recorded choice. */
+      fallback: Objective[];
+    };
 
 export interface ChoiceOption {
   id: string;
@@ -57,686 +62,509 @@ export interface Chapter {
   title: string;
   subtitle: string;
   atmosphere: AtmosphereId;
-  /** Shown on the chapter-select card. */
   brief: string;
-  /** Where the player is placed when the chapter begins. */
   spawn: Anchor;
   beats: Objective[];
 }
 
+const at = (id: string): Anchor => ({ at: "landmark", id });
+const lines = (...entries: [string, string][]): Line[] => entries.map(([who, text]) => ({ who, text }));
+const talk = (...entries: [string, string][]): Objective => ({ kind: "talk", lines: lines(...entries) });
+const travel = (title: string, detail: string, place: string): Objective =>
+  ({ kind: "travel", title, detail, anchor: at(place), radius: 32 });
+const rescue = (title: string, detail: string, place: string, count: number, seconds: number): Objective =>
+  ({ kind: "rescue", title, detail, anchor: at(place), count, seconds });
+const investigate = (title: string, detail: string, place: string, sites = 3, spread = 320): Objective =>
+  ({ kind: "investigate", title, detail, anchor: at(place), sites, spread });
+const route = (title: string, detail: string, places: string[], seconds?: number, minKph?: number): Objective =>
+  ({ kind: "route", title, detail, anchor: at(places[0]!), gates: places.length, spread: 0,
+    stops: places.map(at), seconds, minKph });
+const duel = (title: string, detail: string, place: string, rogue: string): Objective =>
+  ({ kind: "duel", title, detail, anchor: at(place), rogue });
+
+export const GRID_CHOICE_CHAPTER = "ch12-fastest-dude-alive";
+
 const ACT_ONE: Chapter[] = [
   {
-    id: "ch01-longest-second",
-    act: 1,
-    number: 1,
-    title: "The Longest Second",
-    subtitle: "Meridian City · the night of the resonance test",
-    atmosphere: "dusk",
-    brief:
-      "You are a forensic tech who is late for the biggest science story in the city's history. " +
-      "You will not make it. Something else will.",
-    spawn: { at: "landmark", id: "precinct-seven" },
+    id: "ch01-longest-second", act: 1, number: 1,
+    title: "A Route Home", subtitle: "Kestrel Bridge · 20:14", atmosphere: "dusk",
+    brief: "A bridge relay failed. You pulled someone clear. Now your feet can barely keep up with you, " +
+      "and there are still people on the other side of the barriers.",
+    spawn: at("kestrel-bridge"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "narration", text: "Meridian City. 8:41 pm. Halcyon Labs is forty minutes from bringing the resonance ring to full power." },
-          { who: "solomon", text: "You're on a roof. In the rain. Logging shell casings." },
-          { who: "nolan", text: "Chain of custody doesn't care about the weather, Sol." },
-          { who: "solomon", text: "Nadia saved you a seat at the lab thing. Front row. She had to ask a man she doesn't like." },
-          { who: "nolan", text: "I'll make it." },
-          { who: "solomon", text: "You have never once made it." },
-        ],
-      },
-      {
-        kind: "travel",
-        title: "Get to Halcyon Labs",
-        detail: "Across town. You have nineteen minutes and no car.",
-        anchor: { at: "landmark", id: "halcyon-labs" },
-        radius: 40,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "narration", text: "The ring comes up to power at 9:02 pm. At 9:03 the containment field inverts." },
-          { who: "narration", text: "The front crosses Meridian in eleven seconds. It comes down the precinct's antenna mast, through six floors of wet steel, and finds a man on a roof." },
-          { who: "nolan", text: "…oh." },
-        ],
-      },
+      talk(
+        ["narration", "Two hours ago, Nolan Reyes was delivering a replacement relay to Kestrel Bridge. He remembers a maintenance worker falling. He remembers reaching him before the light did."],
+        ["wren", "You are awake, coherent, and running a temperature I cannot put on a chart. Those are three separate observations. Only two are good."],
+        ["teo", "The rescue suit is venting the discharge. Keep it on. Start on the straight road; we need to know whether you can stop."],
+        ["nolan", "The worker. Did he make it?"],
+        ["wren", "Yes. He wants his delivery signed for."]
+      ),
+      { kind: "reach-speed", title: "Find your feet", detail: "Hold forward and Sprint on a straight road. Release to brake.", kph: 200, hold: 2 },
+      talk(
+        ["solomon", "Precinct Seven to anyone at Kestrel. The pedestrian exits have locked. Three people are still outside the evacuation line."],
+        ["wren", "Nolan, walk them clear. Fast getting there. Gentle when you arrive."],
+        ["nolan", "I know the route."]
+      ),
+      rescue("Clear the bridge approaches", "Reach each stranded resident. Slow down at the rescue markers.", "kestrel-bridge", 3, 110),
+      travel("Report to the emergency desk", "Kade needs a witness before the bridge logs are overwritten.", "precinct-seven"),
+      talk(
+        ["solomon", "The system marks the bridge empty. I can see three people on your camera."],
+        ["nolan", "One of them was waving at the emergency speaker. It told her to wait."],
+        ["solomon", "Then we start with her name. All three names. Nobody goes in this log as a rounding error."]
+      ),
     ],
   },
   {
-    id: "ch02-eleven-months",
-    act: 1,
-    number: 2,
-    title: "Eleven Months",
-    subtitle: "Halcyon Labs · the basement",
-    atmosphere: "noon",
-    brief: "You wake up in the building that killed you. The people who kept you alive would like a word.",
-    spawn: { at: "landmark", id: "halcyon-labs" },
+    id: "ch02-eleven-months", act: 1, number: 2,
+    title: "Manual Override", subtitle: "Meridian · the morning after", atmosphere: "dawn",
+    brief: "The city calls the bridge failure isolated. A clinic's backup battery and an unanswered dispatch say otherwise.",
+    spawn: at("precinct-seven"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "wren", text: "Don't sit up. Your heart has been doing four hundred beats a minute for eleven months and I would like to keep it." },
-          { who: "nolan", text: "Eleven — " },
-          { who: "teo", text: "Months. Yeah. We had a whole thing going. I read to you. Mostly manuals." },
-          { who: "vance", text: "Nolan. My name is Aldous Vance. I built the ring that did this to you." },
-          { who: "nolan", text: "I know who you are. Half the city wants you in a cell." },
-          { who: "vance", text: "The other half has stopped caring, which is worse. You are the only person the front touched who came back with something that isn't a tumour. I would like to find out what." },
-          { who: "wren", text: "Carefully." },
-          { who: "vance", text: "Carefully." },
-        ],
-      },
-      {
-        kind: "reach-speed",
-        title: "The measured mile",
-        detail: "Teo has cones out on the access road. Open up and hold it.",
-        kph: 340,
-        hold: 2.5,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "teo", text: "Three hundred and fifty. In sneakers. On a road." },
-          { who: "wren", text: "His core temperature went up nine degrees and came back down in under a second. That should have cooked him." },
-          { who: "vance", text: "It should have. Teo — the suit." },
-          { who: "teo", text: "It's not finished." },
-          { who: "vance", text: "It is finished enough. He is going to run whether we hand him anything or not. I would rather he did it in something that doesn't catch fire." },
-        ],
-      },
-      {
-        kind: "route",
-        title: "Suit trial",
-        detail: "Six markers across Halcyon Row. Teo wants telemetry on the corners.",
-        anchor: { at: "landmark", id: "halcyon-labs" },
-        gates: 6,
-        spread: 620,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "teo", text: "Okay. Okay! The lattice held. You're welcome, by the way." },
-          { who: "nolan", text: "Why does it have a stripe?" },
-          { who: "teo", text: "Because it looked sad without one. Next question." },
-        ],
-      },
+      talk(
+        ["sable", "Until the bridge is inspected, transit gets emergency priority. Keep that corridor open."],
+        ["wren", "My clinic requested power before the bridge failed. The reply still says six minutes."],
+        ["nolan", "How long has it said six minutes?"],
+        ["wren", "Since yesterday."]
+      ),
+      route("The battery run", "Collect the transit spare, take it to Halcyon's clinic annex, then check the neighborhood aid desk.",
+        ["ridgeline-transit", "halcyon-labs", "kade-house"], 150),
+      talk(
+        ["elena", "Tell your captain the people charging oxygen batteries in Solomon's kitchen also count as an emergency."],
+        ["nolan", "Mum, you could have called me."],
+        ["elena", "I called the number everyone else has. That is the point."],
+        ["teo", "Nolan, the annex roof has a dead repeater. Hit a solid wall at speed to run up it. Jump when you need to leave the wall."]
+      ),
+      travel("Reach the annex", "Return to Halcyon. Use a nearby facade for the repeater check.", "halcyon-labs"),
+      { kind: "climb", title: "Get above the dead zone", detail: "Sprint into a building wall and climb at least 24 metres.", anchor: at("halcyon-labs"), height: 24 },
+      talk(
+        ["teo", "Repeater is fine. Those requests were received."],
+        ["wren", "Then somebody needs to explain why receiving a request is different from answering it."],
+        ["sable", "I will ask Halcyon. Nolan, don't turn yourself into a second dispatch system."],
+        ["nolan", "I would love to stop being the first one that works."]
+      ),
     ],
   },
   {
-    id: "ch03-runs-hot",
-    act: 1,
-    number: 3,
-    title: "A Man Who Runs Hot",
-    subtitle: "Old Meridian · four blocks on fire",
-    atmosphere: "golden",
-    brief:
-      "The front didn't only touch you. A foundry foreman named Roland Boyce is walking " +
-      "through Old Meridian and everything he passes is burning.",
-    spawn: { at: "point", x: -300, z: -900 },
+    id: "ch03-runs-hot", act: 1, number: 3,
+    title: "Controlled Demolition", subtitle: "Sable Arena · a scheduled fault", atmosphere: "golden",
+    brief: "A contractor is destroying supposedly obsolete relays. The residents using them did not get the notice.",
+    spawn: at("sable-arena"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "solomon", text: "Four blocks. Every hydrant in the district is running and it isn't touching it." },
-          { who: "wren", text: "Nolan, listen to me. You are faster than a fire. You are not more fireproof than one." },
-          { who: "nolan", text: "Get everyone out first. Understood." },
-        ],
-      },
-      {
-        kind: "rescue",
-        title: "Clear the block",
-        detail: "Eight people still inside the cordon. Move.",
-        anchor: { at: "player" },
-        count: 8,
-        seconds: 70,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "teo", text: "Okay, I've been thinking about this and I want it on the record before anyone else says anything." },
-          { who: "wren", text: "Teo." },
-          { who: "teo", text: "Kiln. His name is Kiln. It's a foundry word, it's thematically airtight, and I will not be taking notes." },
-          { who: "solomon", text: "Who is talking in my ear." },
-        ],
-      },
-      {
-        kind: "duel",
-        title: "Stop Kiln",
-        detail: "He telegraphs before every swing. Take him during the recovery.",
-        anchor: { at: "player" },
-        rogue: "kiln",
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "vance", text: "You hit him nineteen times in four seconds and stopped when he went down." },
-          { who: "nolan", text: "He's a foreman with a bad year." },
-          { who: "vance", text: "Yes. I wanted to be sure you knew that at that speed. Most people would not have." },
-        ],
-      },
+      talk(
+        ["solomon", "A demolition rig at the arena. Licensed operator. No evacuation permit."],
+        ["kiln", "Roland Boyce. Decommission order, signed and paid. Your people should have cleared the block."],
+        ["nolan", "They are still in it. Put the rig down."],
+        ["kiln", "The schedule doesn't have a box for that."]
+      ),
+      rescue("Clear the work zone", "Get five residents away from the relay approaches before confronting the operator.", "sable-arena", 5, 110),
+      duel("Shut down Kiln's rig", "Move out of the heat, circle behind him, and strike between attacks.", "sable-arena", "kiln"),
+      investigate("Read the work orders", "Check three relay inspection points around the arena.", "sable-arena"),
+      talk(
+        ["teo", "They weren't obsolete. Same part number as the relay Nolan delivered yesterday."],
+        ["nadia", "The contractor gets a completion bonus if the failure is classified as wear. Send me the order exactly as you found it."],
+        ["nolan", "Someone is paying him to break working equipment?"],
+        ["nadia", "Someone is paying him to replace equipment on paper. We prove the rest."]
+      ),
     ],
   },
   {
-    id: "ch04-the-streak",
-    act: 1,
-    number: 4,
-    title: "The Streak",
-    subtitle: "The Meridian Ledger · page one",
-    atmosphere: "golden",
-    brief:
-      "Nadia files eight hundred words about a blur that pulls people out of burning buildings. " +
-      "Her father reads it at the breakfast table.",
-    spawn: { at: "landmark", id: "ledger-tower" },
+    id: "ch04-the-streak", act: 1, number: 4,
+    title: "On the Record", subtitle: "The Ledger · three copies", atmosphere: "noon",
+    brief: "A story that depends on one stolen file can disappear with it. Put the evidence in more than one pair of hands.",
+    spawn: at("ledger-tower"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "nadia", text: "'The Streak.' It's a working title. My editor wanted 'Meridian's Guardian Angel' and I threw a stapler." },
-          { who: "nolan", text: "You don't know who it is." },
-          { who: "nadia", text: "No. But he came back for a cat, Nolan. A whole burning block and he went back in for a cat. Whoever that is, he's got a tell." },
-          { who: "solomon", text: "Nadia. Drop it." },
-          { who: "nadia", text: "Dad — " },
-          { who: "solomon", text: "People who chase things like this end up in the file, not on the byline." },
-        ],
-      },
-      {
-        kind: "travel",
-        title: "Kestrel Bridge",
-        detail: "Sable's task force has something crossing the river. Get eyes on it.",
-        anchor: { at: "landmark", id: "kestrel-bridge" },
-        radius: 60,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "sable", text: "Whoever you are — this is Captain Sable, MCPD. You are in my city, on my bridge, on an open channel." },
-          { who: "nolan", text: "How is she on this frequency?" },
-          { who: "teo", text: "Because I built the radio in eleven days and I am one man." },
-          { who: "sable", text: "You keep pulling people out of fires and I keep not arresting you. Neither of those is a plan. Come and talk to me before someone makes it one." },
-        ],
-      },
-      {
-        kind: "route",
-        title: "The Riverline",
-        detail: "Down the Kestrel and back. Under the gate speed you go in the water.",
-        anchor: { at: "landmark", id: "kestrel-bridge" },
-        gates: 5,
-        spread: 900,
-        minKph: 150,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "wren", text: "You ran across water." },
-          { who: "nolan", text: "I ran across water." },
-          { who: "wren", text: "For four hundred metres. I want to say something scientific and what I have is: what." },
-          { who: "vance", text: "Surface tension holds for exactly as long as you outrun the displacement. Slow down and the river remembers you weigh something." },
-        ],
-      },
+      talk(
+        ["nadia", "Halcyon's lawyers say the relay contract is authentic and I have misunderstood every word of it."],
+        ["nolan", "That sounds promising."],
+        ["nadia", "It sounds like I need the original dispatch record. My father is going to enjoy this."],
+        ["solomon", "I already printed it. There are mistakes in it. Some are mine."]
+      ),
+      investigate("Match the original calls", "Collect three local dispatch logs around Precinct Seven.", "precinct-seven", 3, 380),
+      route("Keep a public record", "Deliver matching copies to the emergency desk, residents' aid desk, and Ledger archive.",
+        ["precinct-seven", "kade-house", "ledger-tower"], 135),
+      talk(
+        ["nadia", "Published. Contracts, timestamps, and the names of the people who agreed to speak."],
+        ["nolan", "What did you call me?"],
+        ["nadia", "Municipal courier. You can correct it if you've quit."],
+        ["nolan", "No. That's right."],
+        ["vance", "Ms. Kade. Your figures are accurate. Your explanation is incomplete. I will meet you at Halcyon without a lawyer."]
+      ),
     ],
   },
 ];
 
 const ACT_TWO: Chapter[] = [
   {
-    id: "ch05-dead-seconds",
-    act: 2,
-    number: 5,
-    title: "Dead Seconds",
-    subtitle: "Citywide · minutes that nobody lived",
-    atmosphere: "golden",
-    brief:
-      "At 4:12 pm, everyone in Meridian loses ninety seconds. Traffic cameras skip. " +
-      "Kettles boil in empty rooms. It happens again at 6:40.",
-    spawn: { at: "landmark", id: "ridgeline-transit" },
+    id: "ch05-dead-seconds", act: 2, number: 5,
+    title: "The Waiting List", subtitle: "Halcyon · what the averages hide", atmosphere: "golden",
+    brief: "The grid's architect explains the bargain. Then you visit the addresses missing from the sales pitch.",
+    spawn: at("halcyon-labs"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "nadia", text: "Every clock in the concourse is ninety seconds behind the network. Every clock, Nolan. Not slow. Skipped." },
-          { who: "wren", text: "Two hundred thousand people did not experience a minute and a half of their own lives." },
-          { who: "nolan", text: "Did I?" },
-          { who: "wren", text: "No. You're the only telemetry that runs clean through it. Which is either very good news or the worst possible news." },
-        ],
-      },
-      {
-        kind: "investigate",
-        title: "Read the sites",
-        detail: "Three points where the skip was deepest. Get there and log them.",
-        anchor: { at: "landmark", id: "ridgeline-transit" },
-        sites: 3,
-        spread: 900,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "teo", text: "Okay. Plot the three sites. Now plot the eleven smaller ones from last week." },
-          { who: "nolan", text: "They're a circle." },
-          { who: "teo", text: "They're an arc. And if you carry the arc, the centre is — " },
-          { who: "nolan", text: "Halcyon." },
-          { who: "vance", text: "The ring has been cold for a year. I switch it on myself every morning to prove it to the inspectors." },
-          { who: "wren", text: "Then something is drawing time toward a machine that isn't running." },
-        ],
-      },
-      {
-        kind: "reach-speed",
-        title: "Chase the front",
-        detail: "The next skip is starting. Get inside it and hold pace.",
-        kph: 520,
-        hold: 3,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "narration", text: "Inside the skip, the city is a photograph. Rain hangs. A pigeon is a fixed shape in the air." },
-          { who: "narration", text: "And a long way off, moving through it, there is somebody else." },
-          { who: "nolan", text: "…Wren. There's someone in here with me." },
-        ],
-      },
+      talk(
+        ["vance", "The Priority Grid moves reserve power where a failure would cost the most lives. We sold guaranteed access to fund its expansion."],
+        ["wren", "Guaranteed access to whom?"],
+        ["vance", "Hospitals first. Then major employers. Transit. Private subscribers."],
+        ["nolan", "My mother's block comes after a subscription."],
+        ["vance", "Your mother's block would not have a relay without those subscriptions."],
+        ["nadia", "Let us test both halves of that sentence."]
+      ),
+      investigate("Audit the overflow circuit", "Log four emergency relays around Marrow Hill.", "kade-house", 4, 430),
+      rescue("Answer the waiting calls", "Reach the residents whose assistance requests are still queued.", "kade-house", 5, 110),
+      talk(
+        ["wren", "The grid counts patients connected to registered equipment. Home oxygen isn't registered. Neither is a lift someone needs to leave a fire."],
+        ["solomon", "Our response time improved because the clock starts when the grid accepts the call. Not when a person makes it."],
+        ["nolan", "Then publish the waiting time too."],
+        ["vance", "That will make the entire system look worse."],
+        ["solomon", "It will make it look like itself."]
+      ),
     ],
   },
   {
-    id: "ch06-pressure-systems",
-    act: 2,
-    number: 6,
-    title: "Pressure Systems",
-    subtitle: "The Meridian Ledger · forty-one floors",
-    atmosphere: "storm",
-    brief:
-      "Margo Sable filed eleven warnings about the resonance ring. The Ledger printed none of them. " +
-      "Today she is on the roof and the sky is doing what she tells it.",
-    spawn: { at: "landmark", id: "ledger-tower" },
+    id: "ch06-pressure-systems", act: 2, number: 6,
+    title: "A Controlled Failure", subtitle: "Ridgeline · the cooling circuit", atmosphere: "storm",
+    brief: "A former systems engineer intends to make the grid's defects impossible to ignore. There are commuters under her demonstration.",
+    spawn: at("ridgeline-transit"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "nadia", text: "She's got the whole newsroom on forty. She isn't asking for money, Nolan, she's asking for a correction." },
-          { who: "sable", text: "That is my sister up there." },
-          { who: "nolan", text: "…Captain?" },
-          { who: "sable", text: "Margo Sable. Atmospheric research, Halcyon Labs, eleven memoranda, no replies. Get her down. Do not make me regret which of you I trusted." },
-        ],
-      },
-      {
-        kind: "climb",
-        title: "Run the tower",
-        detail: "Lifts are out and the stairwell is flooded. Take the outside.",
-        anchor: { at: "landmark", id: "ledger-tower" },
-        height: 100,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "teo", text: "Gale. She's Gale. I'm sorry, it's right there." },
-          { who: "wren", text: "Her core temperature is dropping. She's holding a pressure differential the size of a district with her own body heat." },
-          { who: "nolan", text: "So if I take too long — " },
-          { who: "wren", text: "She kills herself proving a point. Yes." },
-        ],
-      },
-      {
-        kind: "duel",
-        title: "Bring Gale down",
-        detail: "She fires where you were. Stop being there.",
-        anchor: { at: "landmark", id: "ledger-tower" },
-        rogue: "gale",
-      },
-      {
-        kind: "rescue",
-        title: "Clear the newsroom",
-        detail: "Six people on forty and the floor is coming apart.",
-        anchor: { at: "landmark", id: "ledger-tower" },
-        count: 6,
-        seconds: 60,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "nadia", text: "She was right. That's the thing nobody's going to print. Every warning in that file was right." },
-          { who: "nolan", text: "Then print it." },
-          { who: "nadia", text: "I'm going to. And when I do, somebody at Halcyon is going to have to explain why eleven memos about containment went into a drawer." },
-        ],
-      },
+      talk(
+        ["gale", "I filed the pressure report twice. A shutdown costs less than another year of pretending."],
+        ["teo", "Margo, the tunnel doors use the same circuit. Your shutdown locks them."],
+        ["gale", "Then the city will finally have to send somebody."],
+        ["nolan", "It sent me. Stop the pressure rig."]
+      ),
+      rescue("Open an evacuation path", "Reach six commuters around the transit approaches.", "ridgeline-transit", 6, 120),
+      duel("Disable Gale's pressure rig", "Keep moving across the gusts and close in after a volley.", "ridgeline-transit", "gale"),
+      route("Restart the cooling loop", "Reset the transit, bridge, and Halcyon junctions in order.",
+        ["ridgeline-transit", "kestrel-bridge", "halcyon-labs"], 140),
+      talk(
+        ["gale", "Iona said your suit could cover the evacuation. She said nobody would be left waiting."],
+        ["sable", "Iona Vale? She commanded the Westhaven rescue station."],
+        ["nolan", "Where is she now?"],
+        ["sable", "I closed her station. The grid marked it redundant. She hasn't taken my calls since."]
+      ),
     ],
   },
   {
-    id: "ch07-cold-equation",
-    act: 2,
-    number: 7,
-    title: "The Cold Equation",
-    subtitle: "Ridgeline Transit · platform nine",
-    atmosphere: "night",
-    brief:
-      "Cassian Vok worked out the thing nobody at Halcyon did: you don't have to catch a speedster. " +
-      "You only have to make the air expensive.",
-    spawn: { at: "landmark", id: "ridgeline-transit" },
+    id: "ch07-cold-equation", act: 2, number: 7,
+    title: "The Price of a Street", subtitle: "Kestrel Bridge · containment", atmosphere: "night",
+    brief: "A damping field blocks the repair convoy. Its operator has a contract and very little interest in what happens on either side.",
+    spawn: at("kestrel-bridge"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "solomon", text: "Bullion transfer, platform nine, and a man in a long coat who walked past four armed officers like they were scenery." },
-          { who: "teo", text: "Nolan, his field is a dampening bubble. Inside it your momentum bleeds off about nine times faster than it should." },
-          { who: "nolan", text: "So I stay outside it." },
-          { who: "teo", text: "He's going to put it exactly where you need to be. That's the whole trick." },
-        ],
-      },
-      {
-        kind: "duel",
-        title: "Stop Coldsnap",
-        detail: "Fight around the field, not through it.",
-        anchor: { at: "landmark", id: "ridgeline-transit" },
-        rogue: "coldsnap",
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "vantage", text: "He was close. You should know that. Two more seconds of that field and I would have had to come down and finish it myself." },
-          { who: "nolan", text: "Who is this. Teo, who is on this channel." },
-          { who: "teo", text: "Nobody. Nolan, there is nobody on this channel." },
-          { who: "vantage", text: "Run home, Mr. Reyes. You are going to need the practice." },
-        ],
-      },
+      talk(
+        ["coldsnap", "Cassian Vok. This is a containment perimeter. Cross it and your suit stops doing the impressive part."],
+        ["nolan", "There are replacement batteries in that convoy."],
+        ["coldsnap", "Then I suggest you discuss access with my client."],
+        ["teo", "The field is strongest close to him. Make him commit to a pulse, then get around the edge."]
+      ),
+      duel("Break Coldsnap's blockade", "Work around the damping field. Keep enough distance to recover speed.", "kestrel-bridge", "coldsnap"),
+      route("Get the repair parts through", "Carry the convoy's control modules to the arena depot and the transit workshop.",
+        ["sable-arena", "ridgeline-transit"], 100),
+      talk(
+        ["vantage", "You are repairing the locks on a door people have been asking to open for six years."],
+        ["nolan", "Iona? These batteries keep people breathing tonight."],
+        ["vantage", "I know. I carried them before you could do it in seconds. Ask Sable why your mother still needs a phone tree."],
+        ["nolan", "Come ask her with me."],
+        ["vantage", "I already did."]
+      ),
     ],
   },
   {
-    id: "ch08-what-wren-knows",
-    act: 2,
-    number: 8,
-    title: "What Wren Knows",
-    subtitle: "Halcyon Labs · sub-level four",
-    atmosphere: "night",
-    brief:
-      "Wren's hands stop being warm. The founding data doesn't match the public record. " +
-      "And there is a corridor behind the ring room that is not on any plan of this building.",
-    spawn: { at: "landmark", id: "halcyon-labs" },
+    id: "ch08-what-wren-knows", act: 2, number: 8,
+    title: "The Missing Column", subtitle: "Corbin Green · the paper archive", atmosphere: "dusk",
+    brief: "Wren kept the records the network did not. Iona kept the same names. They reached different conclusions.",
+    spawn: at("corbin-green"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "wren", text: "Take my hand." },
-          { who: "nolan", text: "Wren, that's — how long has it been like that?" },
-          { who: "wren", text: "Six weeks. It was a degree. Then it was four. This morning I put my palm on the sink and the water froze in the trap." },
-          { who: "nolan", text: "You were in the building that night." },
-          { who: "wren", text: "I was in the room next to Aaron. The front went through the wall between us and it took him and it left me this. So no. I have not been in a hurry to tell anyone." },
-        ],
-      },
-      {
-        kind: "investigate",
-        title: "Pull the founding data",
-        detail: "Four archive terminals across the Halcyon campus. Read them all at speed.",
-        anchor: { at: "landmark", id: "halcyon-labs" },
-        sites: 4,
-        spread: 520,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "nolan", text: "The public filing says the ring was designed for particle work. This says lensing. Temporal lensing. From the first page." },
-          { who: "teo", text: "That's — no. No, I built the cooling for that ring. I'd have known what it was for." },
-          { who: "nolan", text: "You built the cooling for what he told you it was for." },
-          { who: "wren", text: "There's a corridor behind the ring room. It's on the electrical plan and it is on no floor plan since 2009." },
-        ],
-      },
-      {
-        kind: "travel",
-        title: "The sealed corridor",
-        detail: "Behind the ring. Whatever it is, it has its own power feed.",
-        anchor: { at: "landmark", id: "halcyon-labs" },
-        radius: 30,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "narration", text: "The corridor ends in a room the size of a closet. There is a chair in it. There is a suit on a rack, bone-white and gold." },
-          { who: "narration", text: "And there is a newspaper, dated fourteen years from now, with Nadia Kade's byline on the front page and a headline about a man who vanished." },
-          { who: "nolan", text: "Vance." },
-        ],
-      },
+      talk(
+        ["wren", "I kept discharge sheets after the clinic software stopped preserving failed requests. Paper cannot decide an outage was resolved because someone stopped asking."],
+        ["nadia", "I need dates, not patient names. We can publish the delay without publishing someone's worst night."],
+        ["nolan", "Did Iona know you had these?"],
+        ["wren", "She brought me half of them."]
+      ),
+      investigate("Recover the neighborhood logs", "Collect four archive bundles from aid stations around Corbin Green.", "corbin-green", 4, 450),
+      route("Compare the independent records", "Take the archive to Halcyon for the audit, then return a verified copy to the Ledger.",
+        ["halcyon-labs", "ledger-tower"], 105),
+      talk(
+        ["vance", "There is an old recovery command. It disconnects every district, clears the priority table, and restarts from zero."],
+        ["teo", "Clears the table or clears the machinery's memory of what it did?"],
+        ["vance", "Both. The billing record, the queue history, the original requests."],
+        ["nadia", "Then the archive stays here. Nobody's plan gets to erase the evidence."],
+        ["wren", "And nobody turns off a ward to prove it deserved electricity."]
+      ),
     ],
   },
 ];
 
 const ACT_THREE: Chapter[] = [
   {
-    id: "ch09-negative-resonance",
-    act: 3,
-    number: 9,
-    title: "Negative Resonance",
-    subtitle: "Corbin Green · ninety seconds",
-    atmosphere: "storm",
-    brief:
-      "He has been in Meridian for twenty-two years and this is the first time he has let you see him. " +
-      "You cannot win this. You can only still be standing at the end of it.",
-    spawn: { at: "landmark", id: "corbin-green" },
+    id: "ch09-negative-resonance", act: 3, number: 9,
+    title: "Always a Step Ahead", subtitle: "Corbin Green · Vantage", atmosphere: "storm",
+    brief: "Iona's suit knows where the routing grid expects you to turn. You need forty-five seconds to find out how.",
+    spawn: at("corbin-green"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "vantage", text: "There you are." },
-          { who: "nolan", text: "You were in the skip. In the dead seconds. That was you." },
-          { who: "vantage", text: "Every one of them was me. Ninety seconds here, ninety there — I have been taking this city apart a minute at a time and nobody noticed until you." },
-          { who: "vantage", text: "Which is the point of you. Now show me what a year of this bought." },
-        ],
-      },
-      {
-        kind: "survive",
-        title: "Survive Vantage",
-        detail: "Ninety seconds. Stay moving. You will not land a hit and that is not the objective.",
-        anchor: { at: "landmark", id: "corbin-green" },
-        rogue: "vantage",
-        seconds: 90,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "narration", text: "He puts Nolan through a bandstand, two hundred metres of grass and the far kerb, and then stops to let him get up." },
-          { who: "vantage", text: "You are not slow. Understand that. You are simply new." },
-          { who: "vantage", text: "There is a night twenty-two years ago you have never been able to explain. A kitchen. Light with no source. Your mother on the floor and your father with her blood on him and no idea how." },
-          { who: "nolan", text: "How do you know that." },
-          { who: "vantage", text: "Because I was there. And so, Mr. Reyes, were you." },
-        ],
-      },
+      talk(
+        ["vantage", "Vance will promise a review. Sable will promise staffing. Then a faster runner will become their entire expansion plan."],
+        ["nolan", "You used me as the evacuation plan at Ridgeline. How is that different?"],
+        ["vantage", "Because mine ends tonight."],
+        ["teo", "Her suit is receiving your route before you move. I can trace the signal if you stay alive for forty-five seconds. Don't try to win this."]
+      ),
+      { kind: "survive", title: "Trace Vantage's signal", detail: "Survive for 45 seconds. Keep moving and use buildings to break her approach.", anchor: at("corbin-green"), rogue: "vantage", seconds: 45 },
+      talk(
+        ["teo", "Got it. She is reading the same priority map as dispatch. She cannot predict a road the grid has stopped mapping."],
+        ["vantage", "I can be at the spire before you cross the bridge. I can end this before they write another apology."],
+        ["nolan", "You can be first. That isn't the same as getting everyone there."],
+        ["vantage", "Then show me everyone."]
+      ),
+      travel("Regroup at the aid desk", "Take the signal trace to the people planning a way through the shutdown.", "kade-house"),
     ],
   },
   {
-    id: "ch10-twenty-two-years",
-    act: 3,
-    number: 10,
-    title: "Twenty-Two Years",
-    subtitle: "Marrow Hill · a Tuesday in October",
-    atmosphere: "dawn",
-    brief:
-      "Wren says the resonance will tear him apart. Teo says the maths works. " +
-      "Nolan is already running.",
-    spawn: { at: "landmark", id: "kade-house" },
+    id: "ch10-twenty-two-years", act: 3, number: 10,
+    title: "Everyone Is a Route", subtitle: "Meridian · a plan with names", atmosphere: "dawn",
+    brief: "There will not be one miraculous lap that saves the city. Prepare ordinary people to finish the work a runner starts.",
+    spawn: at("kade-house"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "wren", text: "Say it out loud so you hear how it sounds." },
-          { who: "nolan", text: "If I run hard enough at the resonance instead of alongside it, I go back." },
-          { who: "wren", text: "You go back and you come apart. Those are the same sentence." },
-          { who: "teo", text: "…they're not, though. Not necessarily. The front is still active. If he enters it at the right angle at the right speed — " },
-          { who: "wren", text: "Mateo." },
-          { who: "teo", text: "I'm not saying he should. I'm saying the maths doesn't say no." },
-          { who: "solomon", text: "Nolan. Look at me. If you can change it — " },
-          { who: "solomon", text: "No. Sixteen years I've told you that man was guilty. If you can change it, you go." },
-        ],
-      },
-      {
-        kind: "reach-speed",
-        title: "Run at the front",
-        detail: "Everything you have. Straight into it.",
-        kph: 900,
-        hold: 4,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "narration", text: "October. Rain. A kitchen window on Marrow Hill with the light on inside." },
-          { who: "narration", text: "There are two speedsters in that room. One of them is bone-white and gold." },
-          { who: "narration", text: "The other one is wearing Nolan's suit, and he is looking straight out of the window, at Nolan, and he is shaking his head." },
-          { who: "nolan", text: "That's me. That's — I'm already there. I already tried." },
-          { who: "elena", text: "Marcus? Marcus, take Nolan and go — " },
-          { who: "narration", text: "The resonance closes like a hand. Meridian comes back at 6:40 pm, twenty-two years later, and Nolan Reyes is face down in the grass at Corbin Green." },
-        ],
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "nolan", text: "I was there. I was always there. Every time I've thought about that night I was remembering myself." },
-          { who: "wren", text: "Nolan — " },
-          { who: "nolan", text: "I don't get to save her. I never did. It already happened with me in the room." },
-          { who: "wren", text: "Then you get the other thing. You get the man who did it." },
-        ],
-      },
+      talk(
+        ["sable", "We can isolate the spire, but the districts will need local reserves. Nolan takes batteries to all of them."],
+        ["marcus", "No. Nolan takes the connectors. My launch takes batteries to Saltmere. Drivers take the rest."],
+        ["elena", "Residents call back when they are ready. Silence does not mean ready."],
+        ["sable", "Right. People and confirmation, by address. Let's do it properly."]
+      ),
+      route("Lay the manual network", "Deliver couplers to transit, the arena depot, Corbin's aid station, and the bridge crew.",
+        ["ridgeline-transit", "sable-arena", "corbin-green", "kestrel-bridge"], 180),
+      rescue("Finish the evacuation register", "Find the six residents still missing from the bridge crew's roll call.", "kestrel-bridge", 6, 125),
+      talk(
+        ["solomon", "All four crews checked in. This time I can tell you who checked, who answered, and who is still on the way."],
+        ["wren", "The ward has power for the changeover. We have a real margin now, not a prediction."],
+        ["nolan", "What do you need from me?"],
+        ["teo", "One last run. Then we switch the grid off under Iona's feet."]
+      ),
     ],
   },
   {
-    id: "ch11-man-in-the-chair",
-    act: 3,
-    number: 11,
-    title: "The Man in the Chair",
-    subtitle: "Halcyon Labs · the ring room",
-    atmosphere: "night",
-    brief: "Everyone finds out at once. Nobody handles it well. One of them stops being human about it.",
-    spawn: { at: "landmark", id: "halcyon-labs" },
+    id: "ch11-man-in-the-chair", act: 3, number: 11,
+    title: "An Honest Shutdown", subtitle: "Halcyon · responsibility", atmosphere: "night",
+    brief: "Vance can disconnect the priority controller. He must also leave a record of why it was necessary.",
+    spawn: at("halcyon-labs"),
     beats: [
-      {
-        kind: "talk",
-        lines: [
-          { who: "nolan", text: "Stand up." },
-          { who: "vance", text: "Nolan." },
-          { who: "nolan", text: "Stand up, Aldous. You've had twenty-two years of practice." },
-          { who: "narration", text: "He stands up. He does it the way a man does when he has been waiting a very long time to stop pretending." },
-          { who: "vance", text: "Aldous Vance died on a Tuesday in October. I needed a chair at a lab and a reason to build a ring, and he was not using either." },
-          { who: "wren", text: "You were in the building. When it failed. You were in the building and you let it fail." },
-          { who: "vance", text: "I made it fail. I needed a speedster and the front had to touch someone. It could have been any of forty people on that roster." },
-          { who: "vance", text: "It was Aaron and it was you, Dr. Adeyemi, and it was a technician on a roof who was late for something. I am sorry about two of those." },
-        ],
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "solomon", text: "Meridian PD. On the ground." },
-          { who: "narration", text: "Solomon Kade fires three times from four metres. All three rounds are on the floor before the sound arrives." },
-          { who: "vantage", text: "Detective. I have read your file. You are a good man in a story that does not have a use for one." },
-          { who: "wren", text: "Get away from him." },
-          { who: "narration", text: "The temperature in the ring room drops eleven degrees in a second and a half. Frost climbs the containment housing. Wren Adeyemi is standing very still with her hands open." },
-          { who: "teo", text: "…okay. Okay! That's new. We're going to name that later." },
-        ],
-      },
-      {
-        kind: "duel",
-        title: "Hold the ring room",
-        detail: "Wren has slowed him. It will not last. Make it count.",
-        anchor: { at: "landmark", id: "halcyon-labs" },
-        rogue: "vantage",
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "vantage", text: "You hit me. Twice. In a cold room, with help, after a year." },
-          { who: "vantage", text: "Good. Because tomorrow I am going to bring the ring up to full and open the way home, and the front that lets me through will take Meridian with it." },
-          { who: "vantage", text: "You will not stop me because you cannot. But I would like you to be there. You have earned that much." },
-        ],
-      },
+      talk(
+        ["vance", "I can authorize the district isolation. If this goes wrong, the order has my name on it."],
+        ["nadia", "It already has your name on it. The question is whether the public gets to read it."],
+        ["vance", "Record this. I approved subscriber priority after we knew it was delaying emergency service. The failures were foreseeable."],
+        ["nolan", "Keep talking to Nadia. Teo, tell me where to run."]
+      ),
+      route("Disconnect the prediction feed", "Trip the local breakers at Halcyon, transit, the bridge, then the broadcast spire.",
+        ["halcyon-labs", "ridgeline-transit", "kestrel-bridge", "broadcast-spire"], 155),
+      talk(
+        ["teo", "Her route feed is gone. Your suit still works; it carries its own charge. Hers does too, but now she has to watch where you actually go."],
+        ["vantage", "You cut the grid. After all that, you cut the grid."],
+        ["nolan", "The wards are on local power. The records are copied. The crews are ready. Those parts matter."],
+        ["vantage", "They will reconnect it the moment the cameras leave."]
+      ),
+      duel("Take the recovery key", "Vantage has lost the prediction feed. Dodge her approach and counter when she slows.", "broadcast-spire", "vantage"),
+      talk(
+        ["vantage", "I kept every letter. Every hearing date. They let me talk until the room closed."],
+        ["nolan", "Give Nadia the letters. Give Wren the shutdown key. You still get to decide what you do next."],
+        ["narration", "Iona sets the key on the pavement. Sable approaches at walking pace."],
+        ["sable", "You are under arrest. And those letters will be entered as evidence. Including the ones I answered."]
+      ),
     ],
   },
   {
-    id: "ch12-fastest-dude-alive",
-    act: 3,
-    number: 12,
-    title: "The Fastest Dude Alive",
-    subtitle: "Meridian City · all of it",
-    atmosphere: "storm",
-    brief:
-      "The ring comes up at midnight. The resonance front will cross the city in eleven seconds " +
-      "and keep going. Somebody has to run the other way around it.",
-    spawn: { at: "landmark", id: "broadcast-spire" },
+    id: GRID_CHOICE_CHAPTER, act: 3, number: 12,
+    title: "Minutes Owed", subtitle: "Meridian Spire · the handover", atmosphere: "storm",
+    brief: "The immediate threat is over. The reserves are finite. Choose how to keep the city running until its residents can decide what follows.",
+    spawn: at("broadcast-spire"),
     beats: [
+      talk(
+        ["wren", "The backup crews bought us time. The storm is taking it back. Two aid stations need their handover finished now."],
+        ["nolan", "Which first?"],
+        ["solomon", "The bridge, then Corbin. We asked them. We have their actual reserve readings."]
+      ),
+      route("Hold the handover", "Carry the final switching orders to the bridge and Corbin Green, then return to the spire.",
+        ["kestrel-bridge", "corbin-green", "broadcast-spire"], 135),
+      rescue("Clear the spire approaches", "Bring the last five residents inside the local-power perimeter.", "broadcast-spire", 5, 100),
+      talk(
+        ["teo", "We can restore the grid with subscriber priority removed and every queue publicly logged. Efficient, but it keeps one central point of failure."],
+        ["wren", "Or leave districts disconnected and put crews in charge of their own reserves. More deliveries, more fuel, less room for error until we rebuild."],
+        ["nadia", "This is an emergency instruction, Nolan. A public vote comes after. Neither option makes you the mayor."],
+        ["nolan", "Good. I still have a delivery job."]
+      ),
       {
-        kind: "talk",
-        lines: [
-          { who: "teo", text: "Right. Here's the bad idea, and I want everyone to notice I said 'bad'." },
-          { who: "teo", text: "The front expands as a ring. If something runs the opposite way around the city fast enough, the counter-rotation cancels it at the boundary." },
-          { who: "wren", text: "'Something' meaning a person." },
-          { who: "teo", text: "'Something' meaning Nolan doing about a thousand kilometres an hour for a full circuit of Meridian." },
-          { who: "nadia", text: "And if he's a second slow?" },
-          { who: "teo", text: "Then the front gets the city and Nolan gets to watch." },
-          { who: "solomon", text: "He's already gone." },
-        ],
-      },
-      {
-        kind: "route",
-        title: "Run the ring",
-        detail: "One circuit of Meridian, against the front. Do not drop the pace.",
-        anchor: { at: "landmark", id: "broadcast-spire" },
-        gates: 8,
-        spread: 1500,
-        minKph: 620,
-        seconds: 150,
-      },
-      {
-        kind: "talk",
-        lines: [
-          { who: "narration", text: "The front folds at the boundary. Meridian keeps its midnight." },
-          { who: "vantage", text: "Twenty-two years. Twenty-two years in a chair, in a building, in a century I do not belong to." },
-          { who: "nolan", text: "I know." },
-          { who: "vantage", text: "You do not." },
-          { who: "nolan", text: "You killed my mother to slow me down and it made me. You built the thing that gave me this. Every single thing you did to get home is the reason you didn't." },
-        ],
-      },
-      {
-        kind: "duel",
-        title: "Finish it",
-        detail: "He is running on a broken ring and borrowed time. So are you.",
-        anchor: { at: "landmark", id: "broadcast-spire" },
-        rogue: "vantage",
-      },
-      {
-        kind: "choice",
-        title: "The last decision",
-        detail: "The ring is still open. It will close in seconds and it will not open again.",
-        prompt: "Vantage is down, and the way home is still standing open behind him.",
+        kind: "choice", title: "The emergency instruction", detail: "Both plans keep the wards supplied. Your choice changes the work that follows.",
+        prompt: "How should Meridian run until the public hearings?",
         options: [
           {
-            id: "send-him-home",
-            label: "Send him home",
-            outcome: [
-              { who: "nolan", text: "Go. Whatever's left up there — go and be somebody else's problem." },
-              { who: "vantage", text: "…you understand this means I get to have existed." },
-              { who: "nolan", text: "So does she. Somewhere behind us, on a Tuesday in October, she still gets to have existed. I'm not burning that to hurt you." },
-              { who: "narration", text: "The ring closes at 12:04 am. Halcyon Labs is dark for the first time in fourteen years." },
-              { who: "nadia", text: "So what do I call him? In the column. It's going to be a big column." },
-              { who: "teo", text: "I have a list." },
-              { who: "solomon", text: "He's the fastest dude alive, Nadia. Print that and let the man have his dinner." },
-            ],
+            id: "restore-public-grid", label: "Restore a publicly logged grid",
+            outcome: lines(
+              ["nolan", "Restore it with the queues visible. No paid priority. Local crews keep the disconnect switches."],
+              ["teo", "I need your authorization carried to Halcyon, then the transit hub. Nobody gets to quietly turn the old settings back on."],
+              ["nadia", "The first queue report goes out tonight. The ugly parts too."]
+            ),
           },
           {
-            id: "hold-him-here",
-            label: "Hold him here",
-            outcome: [
-              { who: "nolan", text: "No. You don't get the ending. You get the chair." },
-              { who: "narration", text: "Nolan Reyes pulls the containment coupling at 12:03 am. The ring collapses inward and the way home goes with it." },
-              { who: "vantage", text: "You have no idea what you have just done to me." },
-              { who: "nolan", text: "You'll have twenty-two years to explain it. That's the number, isn't it." },
-              { who: "narration", text: "Ironvale takes him on a Thursday. Marcus Reyes walks out of the same building nine days later, blinking, into a city that has to relearn his name." },
-              { who: "marcus", text: "They said a man came forward. Fast, they said. Would not give a name." },
-              { who: "nolan", text: "Yeah. I hear he's like that." },
-            ],
+            id: "disconnect-grid", label: "Keep districts on local control",
+            outcome: lines(
+              ["nolan", "Keep the districts independent. Publish the reserves and let the crews request what they actually need."],
+              ["marcus", "Then take the supply schedule to the bridge and the arena. We will need paid shifts, son. People can't volunteer forever."],
+              ["sable", "Agreed. I am signing for the crews and the fuel now."]
+            ),
           },
         ],
       },
+      {
+        kind: "branch",
+        outcomes: {
+          "restore-public-grid": [route("Authorize the public restart", "Deliver the logged restart order to Halcyon and transit.", ["halcyon-labs", "ridgeline-transit"], 105)],
+          "disconnect-grid": [route("Authorize local supply", "Deliver independent supply orders to the bridge and arena crews.", ["kestrel-bridge", "sable-arena"], 105)],
+        },
+        fallback: [travel("Confirm the handover", "Deliver the signed emergency plan to the dispatch desk.", "precinct-seven")],
+      },
+      talk(
+        ["narration", "At 00:18, every aid station answers a roll call. The city has not been fixed. For the first time tonight, nobody claims it has."],
+        ["elena", "Come home when your shift ends. I do mean ends."],
+        ["nolan", "One more thing first."],
+        ["solomon", "The northern districts. Their calls are coming through now."],
+        ["nolan", "Then we need a bigger map."]
+      ),
+    ],
+  },
+  {
+    id: "ch13-open-circuit", act: 3, number: 13,
+    title: "Open Circuit", subtitle: "Northline · the next morning", atmosphere: "dawn",
+    brief: "The emergency decision has practical consequences. Bring Northline into the new arrangement and find the people missing from its coverage map.",
+    spawn: at("northline-station"),
+    beats: [
+      talk(
+        ["solomon", "Northline used to be listed as an external service area. They pay city taxes. I have corrected the map."],
+        ["nolan", "The streets didn't move overnight."],
+        ["solomon", "No. Just the line around who we thought we owed a call."]
+      ),
+      {
+        kind: "branch", chapter: GRID_CHOICE_CHAPTER,
+        outcomes: {
+          "restore-public-grid": [
+            talk(
+              ["teo", "Your public grid is live downtown. Northline's old relays cannot send queue reports. We need a physical survey before they join."],
+              ["nolan", "And if a relay doesn't report?"],
+              ["teo", "We leave it under local control. Missing data is a reason to check, not permission to assume."]
+            ),
+            investigate("Survey Northline's relays", "Log four legacy connectors around Northline Station.", "northline-station", 4, 380),
+            route("Connect the public monitors", "Carry the surveyed settings to the observatory and Beacon Point's coastal monitor.",
+              ["northline-observatory", "beacon-point"], 155),
+          ],
+          "disconnect-grid": [
+            talk(
+              ["marcus", "Your local-control plan works if the supplies arrive. Northline's first delivery went to a depot that closed eight years ago."],
+              ["nolan", "I will meet the crews at their actual addresses."],
+              ["sable", "The driver is being paid for the delay. A bad manifest is our mistake."]
+            ),
+            rescue("Meet the stranded supply crews", "Reach five Northline residents and drivers caught outside the local aid network.", "northline-station", 5, 120),
+            route("Build the Northline supply loop", "Carry corrected manifests to the observatory and Beacon Point's receiving crew.",
+              ["northline-observatory", "beacon-point"], 155),
+          ],
+        },
+        fallback: [
+          talk(["sable", "Whatever the emergency plan said, Northline needs a verified connection to it. Start with the station's actual equipment."]),
+          investigate("Verify Northline's equipment", "Log four local reserve stations before making the coastal connection.", "northline-station", 4, 380),
+          route("Make the coastal connection", "Deliver the Northline survey to the observatory and Beacon Point.", ["northline-observatory", "beacon-point"], 155),
+        ],
+      },
+      rescue("Close the coastal coverage gap", "Reach the five residents who were outside Beacon Point's old service boundary.", "beacon-point", 5, 120),
+      talk(
+        ["nadia", "Northline's first report is online. Its waiting time is worse than downtown's."],
+        ["nolan", "We just spent all morning there."],
+        ["nadia", "Yesterday we didn't count the wait at all. This is a problem we can finally point to."],
+        ["solomon", "Westhaven is next. This time I called ahead."]
+      ),
+    ],
+  },
+  {
+    id: "ch14-waterline", act: 3, number: 14,
+    title: "Waterline", subtitle: "Westhaven to Saltmere · the ordinary emergency", atmosphere: "storm",
+    brief: "A reservoir pump fails without a villain touching it. The wider city needs maintenance, spare parts, and a route across the water.",
+    spawn: at("westhaven-reservoir"),
+    beats: [
+      talk(
+        ["elena", "Reservoir pump three is down. The replacement was approved last winter. It is apparently still being approved."],
+        ["nolan", "Sabotage?"],
+        ["teo", "A seal that should have been replaced. Sometimes the answer is a seal."],
+        ["marcus", "Foundry has the part. Saltmere has the crane controller. I have a boat and a very unimpressive top speed."]
+      ),
+      investigate("Find the failed pump circuit", "Check three pressure stations around Westhaven Reservoir.", "westhaven-reservoir", 3, 350),
+      route("The long supply run", "Pick up the replacement seal at Foundry Exchange and the crane controller at Saltmere Terminal.",
+        ["foundry-exchange", "saltmere-terminal"], 180),
+      talk(
+        ["marcus", "The crane is back. We can load the part. There are people on the terminal apron waiting for a ferry that isn't coming."],
+        ["nolan", "I can carry the part back."],
+        ["marcus", "It weighs more than my boat. Clear the apron. Let us do this bit."]
+      ),
+      rescue("Clear Saltmere's terminal", "Reach six stranded passengers so the repair crew can use the apron.", "saltmere-terminal", 6, 125),
+      route("Bring the restart order home", "Confirm the bridge delivery, then take the pump restart order to Westhaven.",
+        ["kestrel-bridge", "westhaven-reservoir"], 160),
+      talk(
+        ["elena", "Pressure is coming back. The repair crew says they need another shift to check the other seals."],
+        ["sable", "Approved. Before somebody has to run across the city for them."],
+        ["nolan", "Dad, thank you."],
+        ["marcus", "You're welcome. My boat is now officially faster than a purchase order."]
+      ),
+    ],
+  },
+  {
+    id: "ch15-every-address", act: 3, number: 15,
+    title: "Every Address", subtitle: "Meridian · one week later", atmosphere: "golden",
+    brief: "Finish a route through the expanded city, deliver the residents' demands, and make room for an ending that does not require you to run forever.",
+    spawn: at("foundry-exchange"),
+    beats: [
+      talk(
+        ["nadia", "The first public hearing starts at six. Six districts sent written proposals. None of them begins with 'hire another speedster'."],
+        ["nolan", "A little hurtful."],
+        ["wren", "I helped write that part."],
+        ["solomon", "One collection route: Foundry, Westhaven, Northline, the coast, Saltmere, then the Ledger. No deadline. Bring the papers back intact."]
+      ),
+      route("Every address counts", "Collect the residents' proposals across the expanded city. Take your time; this route has no countdown.",
+        ["foundry-exchange", "westhaven-reservoir", "northline-observatory", "northline-station", "beacon-point", "saltmere-terminal", "ledger-tower"]),
+      {
+        kind: "branch", chapter: GRID_CHOICE_CHAPTER,
+        outcomes: {
+          "restore-public-grid": [talk(
+            ["nadia", "The public grid has reduced the delivery load. Its first independent audit also caught Halcyon trying to exempt three subscribers."],
+            ["nolan", "Did the exemption go through?"],
+            ["nadia", "No. The local crews refused it. Having a way to say no turned out to matter."]
+          )],
+          "disconnect-grid": [talk(
+            ["nadia", "The local districts kept control. They have also demanded shared fuel reserves and paid maintenance crews. Independence still needs coordination."],
+            ["nolan", "Did they get them?"],
+            ["nadia", "Funding is the first vote tonight. I have every councillor's answer on the record."]
+          )],
+        },
+        fallback: [talk(
+          ["nadia", "The residents agree on one thing: no emergency plan becomes permanent just because everyone is tired."],
+          ["nolan", "Good. Let's put their proposals first."]
+        )],
+      },
+      talk(
+        ["vance", "They have asked me to attend as a witness, not a consultant."],
+        ["nadia", "Yes."],
+        ["vance", "I will be there."],
+        ["sable", "Iona's records are in the inquiry. So are her charges. One does not cancel the other."],
+        ["wren", "Nolan, your checkup is tomorrow. An appointment. You are allowed to arrive at an ordinary speed."]
+      ),
+      travel("Clock out", "Take the last delivery home to the Kade House aid desk.", "kade-house"),
+      talk(
+        ["elena", "There he is. The fastest dude alive. Ten minutes late for dinner."],
+        ["nolan", "I walked the last block."],
+        ["marcus", "How was it?"],
+        ["nolan", "Someone else was fixing the streetlight."],
+        ["narration", "Tomorrow there will be another call. Tonight, someone else is on shift. Meridian stays open."]
+      ),
     ],
   },
 ];
 
 export const CHAPTERS: Chapter[] = [...ACT_ONE, ...ACT_TWO, ...ACT_THREE];
-
 export const ACT_TITLES: Record<1 | 2 | 3, string> = {
-  1: "Act I — First Light",
-  2: "Act II — Rogues",
-  3: "Act III — Vantage",
+  1: "Act I — The Calls We Miss",
+  2: "Act II — Who Gets Counted",
+  3: "Act III — Every Address",
 };
 
 export function chapterById(id: string): Chapter {

@@ -8,14 +8,14 @@
  */
 
 const KEY = "fastest-dude-alive:profile";
-const VERSION = 2;
+const VERSION = 3;
 
 /**
  * Bounds for anything read back from storage. A profile is user-editable, so
  * treat it as untrusted input: a hand-written `unlocked: 9999` or a
  * million-entry `collected` array should cost nothing at parse time.
  */
-const MAX_CHAPTERS = 12;
+const MAX_CHAPTERS = 15;
 const MAX_IDS = 512;
 
 function idList(value: unknown): string[] {
@@ -37,6 +37,8 @@ export interface Settings {
   /** Trims camera shake, speed-line density and screen pulses. */
   reducedMotion: boolean;
   showSpeedInMph: boolean;
+  masterVolume: number;
+  muted: boolean;
 }
 
 export interface CampaignSave {
@@ -46,7 +48,17 @@ export interface CampaignSave {
   completed: string[];
   /** Chapter the player is midway through, if any. */
   current: string | null;
+  /** Decisions by chapter id, retained for rebuilding chapters. */
+  choices: Record<string, string>;
 }
+
+/** A bounded 5 Hz personal-best recording. Samples are [seconds, x, y, z, heading]. */
+export interface RouteReplay {
+  duration: number;
+  frames: Array<[number, number, number, number, number]>;
+}
+export const MAX_REPLAY_FRAMES = 1201;
+export const MAX_REPLAYS = 8;
 
 export interface Profile {
   version: number;
@@ -54,6 +66,7 @@ export interface Profile {
   campaign: CampaignSave;
   /** Best time in seconds per free-roam route id. */
   routeBests: Record<string, number>;
+  routeReplays: Record<string, RouteReplay>;
   /** Collectible ids the player has picked up. */
   collected: string[];
   /** Rogue ids beaten at least once in free roam. */
@@ -69,9 +82,12 @@ export const DEFAULT_PROFILE: Profile = {
     lookSensitivity: 1,
     reducedMotion: false,
     showSpeedInMph: false,
+    masterVolume: 0.65,
+    muted: false,
   },
-  campaign: { unlocked: 1, completed: [], current: null },
+  campaign: { unlocked: 1, completed: [], current: null, choices: {} },
   routeBests: {},
+  routeReplays: {},
   collected: [],
   roguesBeaten: [],
   totalDistanceMeters: 0,
@@ -100,10 +116,18 @@ export class Save {
     this.scheduleFlush();
   }
 
-  recordRoute(id: string, seconds: number): boolean {
+  recordRoute(id: string, seconds: number, replay?: RouteReplay): boolean {
+    if (!safeId(id) || !Number.isFinite(seconds) || seconds <= 0) return false;
     const previous = this.profile.routeBests[id];
     if (previous !== undefined && previous <= seconds) return false;
     this.profile.routeBests[id] = seconds;
+    delete this.profile.routeReplays[id];
+    const checked = validateReplay(replay);
+    if (checked && Math.abs(checked.duration - seconds) < 0.02) {
+      const ids = Object.keys(this.profile.routeReplays);
+      if (ids.length >= MAX_REPLAYS) delete this.profile.routeReplays[ids[0]!];
+      this.profile.routeReplays[id] = checked;
+    }
     this.scheduleFlush();
     return true;
   }
@@ -187,7 +211,7 @@ export class Save {
   }
 }
 
-function migrate(raw: unknown): Profile {
+export function migrate(raw: unknown): Profile {
   const profile = structuredClone(DEFAULT_PROFILE);
   if (typeof raw !== "object" || raw === null) return profile;
   const source = raw as Partial<Profile>;
@@ -200,6 +224,10 @@ function migrate(raw: unknown): Profile {
     if (typeof s.lookSensitivity === "number" && Number.isFinite(s.lookSensitivity)) {
       profile.settings.lookSensitivity = Math.min(3, Math.max(0.2, s.lookSensitivity));
     }
+    if (typeof s.masterVolume === "number" && Number.isFinite(s.masterVolume)) {
+      profile.settings.masterVolume = Math.min(1, Math.max(0, s.masterVolume));
+    }
+    profile.settings.muted = s.muted === true;
     profile.settings.reducedMotion = s.reducedMotion === true;
     profile.settings.showSpeedInMph = s.showSpeedInMph === true;
   }
@@ -210,16 +238,33 @@ function migrate(raw: unknown): Profile {
       profile.campaign.unlocked = Math.min(MAX_CHAPTERS, Math.max(1, Math.floor(c.unlocked)));
     }
     profile.campaign.completed = idList(c.completed);
-    profile.campaign.current = typeof c.current === "string" ? c.current : null;
+    profile.campaign.current = typeof c.current === "string" && safeId(c.current) ? c.current : null;
+    if (c.choices && typeof c.choices === "object") {
+      for (const [id, decision] of Object.entries(c.choices).slice(0, MAX_CHAPTERS)) {
+        if (safeId(id) && typeof decision === "string" && safeId(decision)) profile.campaign.choices[id] = decision;
+      }
+    }
+    // Completing the old finale should immediately unlock the new epilogue.
+    if (profile.campaign.completed.includes("ch12-fastest-dude-alive")) {
+      profile.campaign.unlocked = Math.max(13, profile.campaign.unlocked);
+    }
   }
 
   if (typeof source.routeBests === "object" && source.routeBests !== null) {
     let kept = 0;
     for (const [id, value] of Object.entries(source.routeBests)) {
       if (kept >= MAX_IDS) break;
-      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) continue;
+      if (!safeId(id) || typeof value !== "number" || !Number.isFinite(value) || value < 0) continue;
       profile.routeBests[id] = value;
       kept += 1;
+    }
+  }
+
+  if (source.routeReplays && typeof source.routeReplays === "object") {
+    for (const [id, data] of Object.entries(source.routeReplays).slice(0, MAX_REPLAYS)) {
+      if (!safeId(id)) continue;
+      const replay = validateReplay(data);
+      if (replay && Math.abs(replay.duration - (profile.routeBests[id] ?? -1)) < 0.02) profile.routeReplays[id] = replay;
     }
   }
 
@@ -234,4 +279,25 @@ function migrate(raw: unknown): Profile {
 
   profile.version = VERSION;
   return profile;
+}
+
+function safeId(id: string): boolean {
+  return /^[a-z0-9][a-z0-9-]{0,63}$/.test(id);
+}
+
+export function validateReplay(raw: unknown): RouteReplay | null {
+  if (!raw || typeof raw !== "object") return null;
+  const replay = raw as Partial<RouteReplay>;
+  if (typeof replay.duration !== "number" || !Number.isFinite(replay.duration) || replay.duration <= 0 || replay.duration > 240) return null;
+  if (!Array.isArray(replay.frames) || replay.frames.length < 2 || replay.frames.length > MAX_REPLAY_FRAMES) return null;
+  let previous = -1;
+  for (const frame of replay.frames) {
+    if (!Array.isArray(frame) || frame.length !== 5 || !frame.every(Number.isFinite)) return null;
+    const [time, x, y, z, heading] = frame;
+    if (time < 0 || time <= previous || time > replay.duration + 0.02) return null;
+    if (Math.abs(x) > 4000 || Math.abs(z) > 4000 || y < -100 || y > 1000 || Math.abs(heading) > 100) return null;
+    previous = time;
+  }
+  if (replay.frames[0]![0] !== 0 || Math.abs(previous - replay.duration) > 0.02) return null;
+  return { duration: replay.duration, frames: replay.frames.map(frame => [...frame]) };
 }

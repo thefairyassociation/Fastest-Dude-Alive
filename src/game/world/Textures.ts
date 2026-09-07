@@ -167,11 +167,11 @@ export interface FacadeStyle {
 export const FACADE_STYLES: FacadeStyle[] = [
   {
     id: "glass-tower",
-    wall: "#5a6570",
-    streak: "#3f4952",
-    glassTop: "#aac3d6",
-    glassBottom: "#46596a",
-    frame: "#39424b",
+    wall: "#477b84",
+    streak: "#284f5b",
+    glassTop: "#9ec6ce",
+    glassBottom: "#305965",
+    frame: "#364f58",
     litColor: "#ffd9a0",
     litChance: 0.06,
     rows: 8,
@@ -180,11 +180,11 @@ export const FACADE_STYLES: FacadeStyle[] = [
     windowHeight: 0.74,
     roughness: 0.16,
     metallic: 0.28,
-    spandrel: "#333c44",
+    spandrel: "#314c57",
   },
   {
     id: "concrete-block",
-    wall: "#aca28f",
+    wall: "#b8b3a3",
     streak: "#8b8170",
     glassTop: "#5b6b78",
     glassBottom: "#2b333b",
@@ -200,8 +200,8 @@ export const FACADE_STYLES: FacadeStyle[] = [
   },
   {
     id: "brick-mid",
-    wall: "#7c5242",
-    streak: "#5f3d31",
+    wall: "#985b46",
+    streak: "#683c32",
     glassTop: "#4c5a64",
     glassBottom: "#262e35",
     frame: "#4a3229",
@@ -218,10 +218,10 @@ export const FACADE_STYLES: FacadeStyle[] = [
   },
   {
     id: "panel-dark",
-    wall: "#43484e",
+    wall: "#344e61",
     streak: "#33383d",
     glassTop: "#7e97a8",
-    glassBottom: "#232c34",
+    glassBottom: "#233b4b",
     frame: "#2b3238",
     litColor: "#ffd9a0",
     litChance: 0.05,
@@ -436,7 +436,7 @@ export function createRoadMaps(scene: Scene, rng: Rng, roadHalfMeters: number): 
   const { albedo: ctx, height: hgt, size } = painter;
   const pxPerM = size / ROAD_TILE_METERS;
 
-  ctx.fillStyle = "#45474a";
+  ctx.fillStyle = "#353e45";
   ctx.fillRect(0, 0, size, size);
   speckle(ctx, size, 6400, ["#54575a", "#3b3d40", "#616567", "#343638"], 0.09, rng, 3);
   speckle(hgt, size, 9000, ["#6e6e6e", "#8e8e8e", "#767676"], 0.5, rng, 3);
@@ -521,7 +521,28 @@ export function createRoadMaps(scene: Scene, rng: Rng, roadHalfMeters: number): 
   zebra(size - roadHalf - depth - 4, 0, depth, roadHalf, true);
   zebra(size - roadHalf - depth - 4, size - roadHalf, depth, roadHalf, true);
 
-  return publish(scene, "road", painter, ROAD_TILE_METERS, 0.9);
+  // Paint lanes at real metre scale; no extra RNG is consumed, keeping the
+  // legacy city’s seeded layout stable. Amber paired centrelines separate
+  // the carriageways; blue-green edge lanes establish a legible road hierarchy.
+  ctx.fillStyle = "rgba(226,180,87,0.8)";
+  for (const offset of [1.2, size - 3.2]) {
+    ctx.fillRect(offset, roadHalf + 42, 2, size - roadHalf * 2 - 84);
+    ctx.fillRect(roadHalf + 42, offset, size - roadHalf * 2 - 84, 2);
+  }
+  ctx.fillStyle = "rgba(67,115,114,0.48)";
+  const cycle = 2.2 * pxPerM;
+  for (const edge of [roadHalf - cycle - 8, size - roadHalf + 8]) {
+    ctx.fillRect(edge, roadHalf + 42, cycle, size - roadHalf * 2 - 84);
+    ctx.fillRect(roadHalf + 42, edge, size - roadHalf * 2 - 84, cycle);
+  }
+  ctx.fillStyle = "rgba(226,229,215,0.72)";
+  for (const x of [roadHalf * 0.4, size - roadHalf * 0.4]) {
+    for (const y of [size * 0.3, size * 0.7]) {
+      ctx.fillRect(x - 1.5, y - 11, 3, 22);
+      ctx.beginPath(); ctx.moveTo(x, y - 18); ctx.lineTo(x - 5, y - 8); ctx.lineTo(x + 5, y - 8); ctx.fill();
+    }
+  }
+  return publish(scene, "road", painter, ROAD_TILE_METERS, 0.65);
 }
 
 export const SIDEWALK_TILE_METERS = 8;
@@ -530,7 +551,7 @@ export function createSidewalkMaps(scene: Scene, rng: Rng): SurfaceMaps {
   const painter = beginPaint(512);
   const { albedo: ctx, height: hgt, size } = painter;
 
-  ctx.fillStyle = "#8f8d86";
+  ctx.fillStyle = "#b2b0a4";
   ctx.fillRect(0, 0, size, size);
   speckle(ctx, size, 4000, ["#7d7b74", "#a09e96", "#6b6963"], 0.08, rng, 2);
   speckle(hgt, size, 5200, ["#787878", "#8a8a8a"], 0.4, rng, 2);
@@ -563,7 +584,7 @@ export function createGrassMaps(scene: Scene, rng: Rng): SurfaceMaps {
   const painter = beginPaint(512);
   const { albedo: ctx, height: hgt, size } = painter;
 
-  ctx.fillStyle = "#4d6532";
+  ctx.fillStyle = "#596f42";
   ctx.fillRect(0, 0, size, size);
   speckle(ctx, size, 7600, ["#41582a", "#5b7439", "#68804a", "#39501f"], 0.16, rng, 3);
   speckle(hgt, size, 9000, ["#6a6a6a", "#969696"], 0.55, rng, 3);
@@ -586,7 +607,7 @@ export function createWaterMaps(scene: Scene, rng: Rng): SurfaceMaps {
   const painter = beginPaint(512);
   const { albedo: ctx, height: hgt, size } = painter;
 
-  ctx.fillStyle = "#25313c";
+  ctx.fillStyle = "#335c68";
   ctx.fillRect(0, 0, size, size);
 
   // Overlapping sine bands make a cheap but convincing chop.

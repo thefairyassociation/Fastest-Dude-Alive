@@ -9,7 +9,8 @@
     "typecheck": "tsc -b --pretty false",
     "audit": "npm audit --audit-level=high",
     "preview": "vite preview",
-    "test:graphics": "node --import ./tests/register.mjs --test tests/*.test.mjs"
+    "test:graphics": "node --import ./tests/register.mjs --test tests/graphics.test.mjs",
+    "test": "node --import ./tests/register.mjs --test tests/*.test.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^9.16.2",

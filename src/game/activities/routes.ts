@@ -20,7 +20,7 @@ function roof(city: City, x: number, z: number, lift = 3): Vector3 {
 }
 
 export function buildRoutes(city: City): RouteDefinition[] {
-  const edge = city.extent - 220;
+  const edge = 1875 - 220; // Original course geometry keeps saved bests comparable.
 
   const loop: RouteGate[] = [
     { position: road(city, 75, -75) },
@@ -68,6 +68,40 @@ export function buildRoutes(city: City): RouteDefinition[] {
   ];
 
   return [
+    {
+      id: "northline-express", name: "Northline Express",
+      summary: "A 4 km express delivery through the northern boroughs. Settle into the long straights.",
+      par: 60,
+      gates: [[-600, 1950], [-600, 2400], [450, 2400], [900, 2400], [900, 2100], [1500, 2100], [2100, 2100]].map(([x, z]) => ({ position: road(city, x!, z!), radius: 22 })),
+    },
+    {
+      id: "westhaven-circuit", name: "Westhaven Circuit",
+      summary: "Reservoir-side switchbacks. Brake before the corner and carry your exit speed.",
+      par: 58,
+      gates: [[-2250, 750], [-2550, 750], [-2550, 1500], [-2100, 1500], [-2100, 450], [-2550, 450], [-2550, -450], [-2100, -450]].map(([x, z]) => ({ position: road(city, x!, z!), radius: 20 })),
+    },
+    {
+      id: "foundry-night-shift", name: "Foundry Night Shift",
+      summary: "Six dispatches across the industrial belt. Each delivery needs more speed.",
+      par: 55,
+      gates: [[-1500, -2250], [-900, -2250], [-300, -2250], [300, -2250], [900, -2250], [1500, -2250]].map(([x, z], i) => ({ position: road(city, x!, z!), minSpeed: 30 + i * 10, radius: 22 })),
+    },
+    {
+      id: "saltmere-coast", name: "Saltmere Coast",
+      summary: "From freight terminal to lighthouse. Follow the east-bank avenues all the way north.",
+      par: 65,
+      gates: [[2250, -750], [2550, -750], [2550, 0], [2550, 900], [2550, 1500], [2400, 2100]].map(([x, z]) => ({ position: road(city, x!, z!), radius: 24 })),
+    },
+    {
+      id: "five-bridges", name: "Five Bridges",
+      summary: "Run the river from south to north. Five bridge approaches; one unbroken line.",
+      par: 80,
+      gates: [
+        { position: road(city, 900, -2250), radius: 22 },
+        ...[-1950, -1500, -750, -300, 300, 750, 1500, 1950].map(z => ({ position: new Vector3(1050, 0.1, z), minSpeed: 50, radius: 26 })),
+        { position: road(city, 1200, 2250), radius: 22 },
+      ],
+    },
     {
       id: "meridian-loop",
       name: "Meridian Loop",

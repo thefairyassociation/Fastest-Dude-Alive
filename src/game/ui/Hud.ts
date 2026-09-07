@@ -18,6 +18,7 @@ export interface HudState {
   showMph: boolean;
   /** A conversation owns the screen; the click-to-capture hint stands down. */
   dialogueActive: boolean;
+  activitySites?: Array<{ name: string; position: Vector3; kind: "route" | "rescue" | "duel" }>;
 }
 
 const TRAVERSAL_LABEL: Record<string, string> = {
@@ -69,13 +70,30 @@ export class Hud {
   private districtTimer = 0;
   private lastDistrict = "";
   private mapOpen = false;
+  private lastPlayer: Player | null = null;
+  private lastState: HudState | null = null;
+  private readonly mapBase = document.createElement("canvas");
+  private mapBaseReady = false;
+  private readonly miniLocation = element("minimap-location");
+  private readonly mapDistrict = element("map-district");
+  private readonly mapStatus = element("map-status");
 
-  constructor(private readonly city: City) {
+  constructor(private readonly city: City, private readonly onMapClose?: () => void) {
     const mini = this.minimap.getContext("2d");
     const full = this.citymap.getContext("2d");
     if (!mini || !full) throw new Error("The map canvases are unavailable.");
     this.minimapCtx = mini;
     this.citymapCtx = full;
+    element("map-close").addEventListener("click", () => {
+      if (this.onMapClose) this.onMapClose();
+      else this.closeMap();
+    });
+    this.mapOverlay.addEventListener("keydown", (event) => {
+      if (event.key === "Tab") {
+        event.preventDefault();
+        element("map-close").focus();
+      }
+    });
 
     document.addEventListener("pointerlockchange", () => {
       this.captureHint.classList.toggle("is-hidden", document.pointerLockElement !== null);
@@ -83,7 +101,8 @@ export class Hud {
   }
 
   setRenderer(name: string): void {
-    this.rendererBadge.textContent = `${name} · Havok V2`;
+    // Kept in the DOM for diagnostics without intruding on the game HUD.
+    this.rendererBadge.textContent = name;
   }
 
   setVisible(value: boolean): void {
@@ -97,6 +116,10 @@ export class Hud {
   toggleMap(): boolean {
     this.mapOpen = !this.mapOpen;
     this.mapOverlay.classList.toggle("is-hidden", !this.mapOpen);
+    if (this.mapOpen) {
+      if (this.lastPlayer && this.lastState) this.drawCityMap(this.lastPlayer, this.lastState);
+      element("map-close").focus({ preventScroll: true });
+    }
     return this.mapOpen;
   }
 
@@ -125,6 +148,8 @@ export class Hud {
   }
 
   update(dt: number, player: Player, state: HudState): void {
+    this.lastPlayer = player;
+    this.lastState = state;
     const kph = player.speedKph;
     const shown = state.showMph ? kph * 0.621371 : kph;
     this.speedValue.textContent = Math.round(shown).toString();
@@ -174,7 +199,8 @@ export class Hud {
 
     this.captureHint.classList.toggle(
       "is-hidden",
-      document.pointerLockElement !== null || state.dialogueActive,
+      document.pointerLockElement !== null || state.dialogueActive || this.mapOpen ||
+        (typeof navigator.getGamepads === "function" && Array.from(navigator.getGamepads()).some((pad) => pad?.connected)),
     );
 
     this.updateRogue(state.rogue);
@@ -196,11 +222,7 @@ export class Hud {
     this.rogueReal.textContent = rogue.definition.name;
     this.rogueFill.style.transform = `scaleX(${rogue.healthRatio})`;
     const open = rogue.vulnerable;
-    this.rogueTell.textContent = rogue.phantom
-      ? "Cannot be hurt — stay alive"
-      : open
-        ? "Open — hit them now"
-        : "Guarded — wait for the recovery";
+    this.rogueTell.textContent = rogue.phantom ? "Stay moving. Survive the encounter." : rogue.tacticHint;
     this.rogueTell.classList.toggle("warn", !open && !rogue.phantom);
   }
 
@@ -209,6 +231,8 @@ export class Hud {
     if (district !== this.lastDistrict) {
       this.lastDistrict = district;
       this.districtName.textContent = district;
+      this.miniLocation.textContent = district;
+      this.mapDistrict.textContent = district;
       this.districtTimer = 2.6;
       this.districtBanner.classList.add("active");
     } else if (this.districtTimer > 0) {
@@ -253,10 +277,16 @@ export class Hud {
       ctx.fillRect(0, toY(road) - roadHalf, size, roadHalf * 2);
     }
 
-    // The river.
-    ctx.fillStyle = "rgba(76, 122, 148, 0.4)";
-    const riverX = 7 * BLOCK_PITCH;
-    ctx.fillRect(toX(riverX - BLOCK_PITCH * 0.5), 0, BLOCK_PITCH * scale, size);
+    // Sample the world's water query so bridges and any expanded waterfront agree.
+    ctx.fillStyle = "rgba(73, 130, 149, 0.58)";
+    const tile = 30;
+    for (let x = Math.floor((px - range) / tile) * tile; x < px + range; x += tile) {
+      for (let z = Math.floor((pz - range) / tile) * tile; z < pz + range; z += tile) {
+        if (this.city.isWater(x + tile / 2, z + tile / 2)) {
+          ctx.fillRect(toX(x), toY(z + tile), tile * scale + 1, tile * scale + 1);
+        }
+      }
+    }
 
     // Fade beyond the city bounds.
     ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
@@ -279,12 +309,18 @@ export class Hud {
       ctx.fillText(landmark.name, toX(landmark.position.x), toY(landmark.position.z) - 7);
     }
 
+    // Nearby optional activities use diamonds, objectives keep their rings.
+    for (const site of state.activitySites ?? []) {
+      if (Math.hypot(site.position.x - px, site.position.z - pz) > range - 15) continue;
+      drawMapSymbol(ctx, toX(site.position.x), toY(site.position.z), 4.5, activityColor(site.kind), true);
+    }
+
     // Objective markers: in-range dots, out-of-range edge chevrons.
     for (const marker of state.markers) {
       const dx = marker.position.x - px;
       const dz = marker.position.z - pz;
       const distance = Math.hypot(dx, dz);
-      const color = marker.style === "rescue" ? "#6fd3a0" : marker.style === "collectible" ? "#9fd4ff" : "#f2a33c";
+      const color = markerColor(marker.style);
       if (distance * scale < half - 16) {
         ctx.beginPath();
         ctx.arc(toX(marker.position.x), toY(marker.position.z), 6, 0, Math.PI * 2);
@@ -338,57 +374,134 @@ export class Hud {
     const ctx = this.citymapCtx;
     const size = this.citymap.width;
     const extent = this.city.extent;
-    const scale = size / (extent * 2);
-    const toX = (x: number) => (x + extent) * scale;
-    const toY = (z: number) => size - (z + extent) * scale;
+    const inset = 28;
+    const scale = (size - inset * 2) / (extent * 2);
+    const toX = (x: number) => inset + (x + extent) * scale;
+    const toY = (z: number) => size - inset - (z + extent) * scale;
+    if (!this.mapBaseReady) this.buildMapBase(size, inset, scale);
+    ctx.drawImage(this.mapBase, 0, 0);
 
-    ctx.fillStyle = "#0f1114";
-    ctx.fillRect(0, 0, size, size);
+    // Labels get a dark backing for legibility over roads and district tints.
+    const labels: Array<{ x: number; y: number; width: number; height: number }> = [];
+    const label = (name: string, x: number, y: number, color: string, priority = false) => {
+      ctx.font = "500 16px Inter, sans-serif";
+      const width = ctx.measureText(name).width + 10;
+      const bx = Math.max(5, Math.min(size - width - 5, x - width / 2));
+      const by = Math.max(5, y - 31);
+      if (!priority && labels.some((other) => bx < other.x + other.width && bx + width > other.x && by < other.y + other.height && by + 22 > other.y)) return;
+      labels.push({ x: bx, y: by, width, height: 22 });
+      ctx.fillStyle = "rgba(9, 21, 29, 0.91)";
+      ctx.fillRect(bx, by, width, 22);
+      ctx.fillStyle = color;
+      ctx.textAlign = "left";
+      ctx.fillText(name, bx + 5, by + 16);
+    };
 
-    // City blocks.
-    ctx.fillStyle = "rgba(255, 255, 255, 0.055)";
-    for (let gx = -12; gx <= 12; gx += 1) {
-      for (let gz = -12; gz <= 12; gz += 1) {
-        ctx.fillRect(toX(gx * BLOCK_PITCH - 55), toY(gz * BLOCK_PITCH + 55), 110 * scale, 110 * scale);
-      }
+    for (const site of state.activitySites ?? []) {
+      const x = toX(site.position.x);
+      const y = toY(site.position.z);
+      const color = activityColor(site.kind);
+      drawMapSymbol(ctx, x, y, 7, color, true);
+      label(site.name, x, y, color);
     }
-
-    // River.
-    ctx.fillStyle = "rgba(72, 118, 145, 0.55)";
-    ctx.fillRect(toX(7 * BLOCK_PITCH - 75), 0, 150 * scale, size);
-
-    ctx.font = "600 12px Inter, sans-serif";
-    ctx.textAlign = "center";
     for (const landmark of this.city.landmarks) {
-      ctx.fillStyle = landmark.accent;
-      ctx.beginPath();
-      ctx.arc(toX(landmark.position.x), toY(landmark.position.z), 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = "rgba(238, 240, 241, 0.8)";
-      ctx.fillText(landmark.name, toX(landmark.position.x), toY(landmark.position.z) - 10);
+      const x = toX(landmark.position.x);
+      const y = toY(landmark.position.z);
+      drawMapSymbol(ctx, x, y, 3.5, "#a9bbc5", false, true);
+      label(landmark.name, x, y, "#b9c9d0");
     }
-
     for (const marker of state.markers) {
-      ctx.strokeStyle = "#f2a33c";
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(toX(marker.position.x), toY(marker.position.z), 8, 0, Math.PI * 2);
-      ctx.stroke();
+      drawMapSymbol(ctx, toX(marker.position.x), toY(marker.position.z), 10, markerColor(marker.style), marker.style === "threat");
     }
+    if (state.rogue?.alive) drawMapSymbol(ctx, toX(state.rogue.position.x), toY(state.rogue.position.z), 9, "#f67b70", true, true);
 
-    ctx.save();
-    ctx.translate(toX(player.position.x), toY(player.position.z));
-    ctx.rotate(player.root.rotation.y);
-    ctx.fillStyle = "#f5c76a";
+    const playerX = toX(player.position.x);
+    const playerY = toY(player.position.z);
+    ctx.strokeStyle = "rgba(239, 189, 121, .36)";
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(0, -11);
-    ctx.lineTo(8, 9);
-    ctx.lineTo(0, 4);
-    ctx.lineTo(-8, 9);
+    ctx.arc(playerX, playerY, 23, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.save();
+    ctx.translate(playerX, playerY);
+    ctx.rotate(player.root.rotation.y);
+    ctx.fillStyle = "#fff3ce";
+    ctx.strokeStyle = "#101b25";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(0, -13);
+    ctx.lineTo(9, 10);
+    ctx.lineTo(0, 5);
+    ctx.lineTo(-9, 10);
     ctx.closePath();
+    ctx.stroke();
     ctx.fill();
     ctx.restore();
+
+    this.mapDistrict.textContent = this.city.districtNameAt(player.position.x, player.position.z);
+    const nearest = state.markers.reduce<{ distance: number } | null>((best, marker) => {
+      const distance = Math.hypot(marker.position.x - player.position.x, marker.position.z - player.position.z);
+      return !best || distance < best.distance ? { distance } : best;
+    }, null);
+    this.mapStatus.textContent = `${state.objective.title}. ${nearest ? `${formatDistance(nearest.distance)} to your closest objective.` : "Pick a marked activity or find your own way."}`;
+    const scaleElement = element("map-scale-label");
+    scaleElement.textContent = `${(extent * 2 / 1000).toFixed(2)} km across`;
+    scaleElement.parentElement?.setAttribute("aria-label", `City width ${(extent * 2 / 1000).toFixed(2)} kilometres`);
   }
+
+  /** The expanded world is sampled once; each frame draws only changing markers. */
+  private buildMapBase(size: number, inset: number, scale: number): void {
+    this.mapBase.width = size;
+    this.mapBase.height = size;
+    const ctx = this.mapBase.getContext("2d");
+    if (!ctx) return;
+    const extent = this.city.extent;
+    const toX = (x: number) => inset + (x + extent) * scale;
+    const toY = (z: number) => size - inset - (z + extent) * scale;
+    ctx.fillStyle = "#0a151e";
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = "#20313a";
+    ctx.fillRect(inset, inset, size - 2 * inset, size - 2 * inset);
+    const radius = Math.floor(extent / BLOCK_PITCH);
+    const districts = new Map<string, { x: number; z: number; count: number; color: string }>();
+    const colors = ["#304952", "#38434a", "#3c4144", "#263f48", "#354a45", "#3d4641", "#45453f", "#344552", "#3e454b"];
+    for (let gx = -radius; gx <= radius; gx += 1) {
+      for (let gz = -radius; gz <= radius; gz += 1) {
+        const x = gx * BLOCK_PITCH;
+        const z = gz * BLOCK_PITCH;
+        const name = this.city.districtNameAt(x, z);
+        let district = districts.get(name);
+        if (!district) {
+          district = { x: 0, z: 0, count: 0, color: colors[districts.size % colors.length] ?? "#34414a" };
+          districts.set(name, district);
+        }
+        district.x += x;
+        district.z += z;
+        district.count += 1;
+        ctx.fillStyle = district.color;
+        ctx.fillRect(toX(x - 56), toY(z + 56), 112 * scale, 112 * scale);
+      }
+    }
+    // Query actual water so the map includes bridge breaks without a second layout.
+    const tile = BLOCK_PITCH / 3;
+    ctx.fillStyle = "#1b4859";
+    for (let x = -extent; x < extent; x += tile) {
+      for (let z = -extent; z < extent; z += tile) {
+        if (this.city.isWater(x + tile / 2, z + tile / 2)) ctx.fillRect(toX(x), toY(z + tile), tile * scale + .5, tile * scale + .5);
+      }
+    }
+    ctx.textAlign = "center";
+    ctx.font = "600 21px Barlow Condensed, sans-serif";
+    ctx.fillStyle = "rgba(210, 225, 231, .44)";
+    for (const [name, district] of districts) {
+      ctx.fillText(name.toUpperCase(), toX(district.x / district.count), toY(district.z / district.count) + 35);
+    }
+    ctx.strokeStyle = "#7796a14a";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(inset, inset, size - inset * 2, size - inset * 2);
+    this.mapBaseReady = true;
+  }
+
 }
 
 function element(id: string): HTMLElement {
@@ -411,7 +524,43 @@ function tier(speedKph: number): string {
   if (speedKph < 5) return "Still";
   if (speedKph < 90) return "Street";
   if (speedKph < 300) return "Rapid";
-  if (speedKph < 620) return "Supersonic";
-  if (speedKph < 900) return "Overspeed";
-  return "Resonant";
+  if (speedKph < 620) return "Express";
+  if (speedKph < 900) return "Overdrive";
+  if (speedKph < 1235) return "Resonant";
+  return "Supersonic";
+}
+
+function markerColor(style: MarkerEntry["style"]): string {
+  if (style === "rescue") return "#8bc9a5";
+  if (style === "collectible") return "#8fcedf";
+  if (style === "threat") return "#f67b70";
+  return "#efbd79";
+}
+
+function activityColor(kind: "route" | "rescue" | "duel"): string {
+  return kind === "rescue" ? "#8bc9a5" : kind === "duel" ? "#f67b70" : "#efbd79";
+}
+
+function drawMapSymbol(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, color: string, diamond = false, fill = false): void {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = "#0a151e";
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  if (diamond) {
+    ctx.moveTo(0, -radius);
+    ctx.lineTo(radius, 0);
+    ctx.lineTo(0, radius);
+    ctx.lineTo(-radius, 0);
+    ctx.closePath();
+  } else ctx.arc(0, 0, radius, 0, Math.PI * 2);
+  if (fill) ctx.fillStyle = color;
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+function formatDistance(metres: number): string {
+  return metres >= 1000 ? `${(metres / 1000).toFixed(1)} km` : `${Math.round(metres)} m`;
 }

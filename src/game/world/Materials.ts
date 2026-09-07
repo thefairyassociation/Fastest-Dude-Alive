@@ -49,11 +49,22 @@ export class Palette {
     this.surface("metal", createMetalMaps(scene, rng), 0.42, 0.72);
 
     const water = this.surface("water", createWaterMaps(scene, rng), 0.12, 0.1);
-    water.albedoColor = new Color3(0.42, 0.55, 0.62);
+    water.albedoColor = new Color3(0.68, 0.82, 0.83);
     water.alpha = 1;
     water.environmentIntensity = 1.5;
 
-    this.flat("concrete", "#9d9a92", 0.88, 0.02);
+    this.flat("skyline", "#647d87", 0.92, 0.06);
+    this.flat("horizon", "#627978", 1, 0);
+    this.flat("copper", "#ab704d", 0.54, 0.55);
+    this.flat("oxidized-copper", "#397b76", 0.68, 0.3);
+    this.flat("terracotta", "#b96143", 0.88, 0.02);
+    this.flat("park-path", "#bfb5a1", 0.92, 0);
+    this.flat("road-marking", "#dedac4", 0.9, 0);
+    this.flat("harbor-red", "#b74637", 0.7, 0.2);
+    this.flat("harbor-blue", "#3c758a", 0.62, 0.3);
+    this.flat("leaf-sage", "#637e51", 0.98, 0);
+    this.emissive("warm-light", "#efbb7d", 0.85);
+    this.flat("concrete", "#aaa99f", 0.88, 0.02);
     this.flat("concrete-dark", "#6d6b66", 0.9, 0.02);
     this.flat("trunk", "#4c3a2c", 0.94, 0);
     this.flat("leaf", "#44582f", 0.96, 0);
@@ -144,7 +155,7 @@ export class Palette {
 
   private flat(key: string, hex: string, roughness: number, metallic: number): PBRMaterial {
     const material = new PBRMaterial(key, this.scene);
-    material.albedoColor = Color3.FromHexString(hex);
+    material.albedoColor = Color3.FromHexString(hex).toLinearSpace();
     material.roughness = roughness;
     material.metallic = metallic;
     material.environmentIntensity = 0.85;

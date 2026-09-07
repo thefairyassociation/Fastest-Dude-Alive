@@ -58,11 +58,16 @@ export class Input {
   /** Gamepad buttons currently down, and the edges not yet consumed. */
   private readonly padHeld = new Set<number>();
   private readonly padPressed = new Set<number>();
+  /** A menu's held confirm/back must be released before gameplay can own it. */
+  private readonly padQuarantined = new Set<number>();
   /** Tracks the gamepad Start button independently of gameplay input. */
   private padPauseHeld = false;
+  private padMapHeld = false;
   private readonly bindings: Record<Action, string[]> = structuredClone(DEFAULT_BINDINGS);
   private lookX = 0;
   private lookY = 0;
+  private readonly moveSample = { x: 0, z: 0 };
+  private readonly lookSample = { x: 0, y: 0 };
   /** Multiplies raw mouse deltas; exposed through the settings panel. */
   lookSensitivity = 1;
   private enabled = true;
@@ -78,7 +83,7 @@ export class Input {
 
     window.addEventListener("keyup", (event) => {
       this.held.delete(event.code);
-      if (BLOCKED.has(event.code)) event.preventDefault();
+      if (this.enabled && BLOCKED.has(event.code)) event.preventDefault();
     });
 
     // Losing focus mid-sprint used to leave keys stuck down forever.
@@ -115,6 +120,14 @@ export class Input {
     if (this.enabled === value) return;
     this.enabled = value;
     if (!value) this.releaseAll();
+    else {
+      const pad = this.gamepad();
+      if (pad) {
+        for (let index = 0; index < pad.buttons.length; index += 1) {
+          if (pad.buttons[index]?.pressed) this.padQuarantined.add(index);
+        }
+      }
+    }
   }
 
   requestPointerLock(): void {
@@ -141,10 +154,15 @@ export class Input {
     if (!pad) {
       this.padHeld.clear();
       this.padPressed.clear();
+      this.padQuarantined.clear();
       return;
     }
     for (let index = 0; index < pad.buttons.length; index += 1) {
       const down = pad.buttons[index]?.pressed === true;
+      if (this.padQuarantined.has(index)) {
+        if (!down) this.padQuarantined.delete(index);
+        continue;
+      }
       if (down) {
         if (!this.padHeld.has(index)) this.padPressed.add(index);
         this.padHeld.add(index);
@@ -173,6 +191,16 @@ export class Input {
     }
     this.padPauseHeld = false;
     return false;
+  }
+
+  /** The city map owns a pause, so R3 must still be readable with gameplay muted. */
+  pollMap(): boolean {
+    if (typeof navigator.getGamepads !== "function") { this.padMapHeld = false; return false; }
+    const pad = Array.from(navigator.getGamepads()).find(candidate => candidate?.connected);
+    const held = pad?.buttons[11]?.pressed === true;
+    const pressed = held && !this.padMapHeld;
+    this.padMapHeld = held;
+    return pressed;
   }
 
   down(action: Action): boolean {
@@ -225,26 +253,33 @@ export class Input {
   movement(): { x: number; z: number } {
     const pad = this.gamepad();
     if (pad) {
-      const x = deadzone(pad.axes[0] ?? 0);
-      const z = -deadzone(pad.axes[1] ?? 0);
-      if (x !== 0 || z !== 0) return { x, z };
+      const x = pad.axes[0] ?? 0;
+      const z = -(pad.axes[1] ?? 0);
+      const length = Math.hypot(x, z);
+      if (length > 0.18) {
+        const magnitude = Math.min(1, (length - 0.18) / 0.82);
+        this.moveSample.x = x / length * magnitude;
+        this.moveSample.z = z / length * magnitude;
+        return this.moveSample;
+      }
     }
-    return {
-      x: Number(this.down("right")) - Number(this.down("left")),
-      z: Number(this.down("forward")) - Number(this.down("back")),
-    };
+    this.moveSample.x = Number(this.down("right")) - Number(this.down("left"));
+    this.moveSample.z = Number(this.down("forward")) - Number(this.down("back"));
+    return this.moveSample;
   }
 
-  takeLook(): { x: number; y: number } {
+  takeLook(dt = 1 / 60): { x: number; y: number } {
     const pad = this.gamepad();
     if (pad) {
-      this.lookX += deadzone(pad.axes[2] ?? 0) * 22;
-      this.lookY += deadzone(pad.axes[3] ?? 0) * 18;
+      const frameScale = Math.min(0.05, Math.max(0, dt)) * 60;
+      this.lookX += deadzone(pad.axes[2] ?? 0) * 22 * frameScale;
+      this.lookY += deadzone(pad.axes[3] ?? 0) * 18 * frameScale;
     }
-    const value = { x: this.lookX * this.lookSensitivity, y: this.lookY * this.lookSensitivity };
+    this.lookSample.x = this.lookX * this.lookSensitivity;
+    this.lookSample.y = this.lookY * this.lookSensitivity;
     this.lookX = 0;
     this.lookY = 0;
-    return value;
+    return this.lookSample;
   }
 
   /** Drops every held/pressed code — used on blur and on mode changes. */
@@ -253,6 +288,7 @@ export class Input {
     this.pressed.clear();
     this.padHeld.clear();
     this.padPressed.clear();
+    this.padQuarantined.clear();
     this.lookX = 0;
     this.lookY = 0;
   }
@@ -270,6 +306,7 @@ export class Input {
     if (!pad) return false;
     const index = GAMEPAD_BUTTONS[action];
     if (index === undefined) return false;
+    if (this.padQuarantined.has(index)) return false;
     return pad.buttons[index]?.pressed === true;
   }
 }
@@ -284,6 +321,7 @@ const GAMEPAD_BUTTONS: Partial<Record<Action, number>> = {
   sprint: 10,
   interact: 2,
   activity: 8,
+  map: 11,
   advance: 0,
   pause: 9,
 };
