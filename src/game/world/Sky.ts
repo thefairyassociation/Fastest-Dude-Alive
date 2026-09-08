@@ -237,16 +237,15 @@ export class Sky {
     this.shadows.bias = 0.0003;
     this.shadows.normalBias = 0.08;
     this.shadows.setDarkness(0.12);
-    // NPC casters still use hidden hull proxies with visibility 0. Babylon treats
-    // visibility < 1 as needing alpha blending and drops those submeshes from
-    // the shadow map unless this is on, which is why the actors were casting
-    // nothing at all. Soft transparent shadows stay off, so they cast solid.
-    this.shadows.transparencyShadow = true;
-    this.shadows.enableSoftTransparentShadow = false;
+    // NPC casters use a camera-excluded layer instead of visibility < 1, so
+    // the rest of the city can stay on the opaque shadow path.
+    this.shadows.transparencyShadow = false;
     this.shadows.usePercentageCloserFiltering = true;
     this.shadows.filteringQuality =
       quality === "high" ? ShadowGenerator.QUALITY_HIGH : ShadowGenerator.QUALITY_MEDIUM;
-    this.shadows.autoCalcDepthBounds = true;
+    // Depth-bounds reduction is a full extra scene pass. The setter also
+    // no-ops until a camera exists, so it was never actually helping in play.
+    this.shadows.autoCalcDepthBounds = false;
 
     scene.fogMode = Scene.FOGMODE_EXP2;
 

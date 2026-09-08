@@ -213,8 +213,10 @@ export class Rogue {
     );
     this.shadowCaster.parent = this.root;
     this.shadowCaster.position.y = 0.93;
-    this.shadowCaster.visibility = 0;
+    this.shadowCaster.visibility = 1;
     this.shadowCaster.isPickable = false;
+    // Hidden from the chase camera; still present on the shadow render list.
+    this.shadowCaster.layerMask = 0x10000000;
 
     this.torso = new TransformNode(`rogue-torso-${definition.id}`, scene);
     this.torso.parent = this.root;

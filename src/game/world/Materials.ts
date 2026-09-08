@@ -82,6 +82,7 @@ export class Palette {
     const glass = this.flat("glass", "#4c6272", 0.06, 0.2);
     glass.alpha = 0.42;
     glass.environmentIntensity = 1.8;
+    glass.needDepthPrePass = true;
 
     for (const [index, hex] of ["#b9bdc1", "#24272b", "#d6d7d3", "#6e2822", "#2c3d57", "#565b60"].entries()) {
       this.flat(`car-${index}`, hex, 0.28, 0.15);

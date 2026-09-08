@@ -43,6 +43,7 @@ test('static geometry batches retain dimensions, outward normals and independent
     mesh.computeWorldMatrix(true);
     assert.equal(mesh.getBoundingInfo().boundingBox.minimumWorld.x,-2008);
     assert.equal(mesh.getBoundingInfo().boundingBox.maximumWorld.y,50);
+    assert.equal(mesh.subMeshes.length, 2, 'distant boxes keep separate cull bounds');
   } finally {engine.dispose();}
 });
 

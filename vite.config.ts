@@ -7,6 +7,9 @@ export default defineConfig({
     sourcemap: true,
   },
   server: {
-    host: true,
+    host: "127.0.0.1",
+  },
+  preview: {
+    host: "127.0.0.1",
   },
 });

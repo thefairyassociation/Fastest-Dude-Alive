@@ -114,6 +114,7 @@ export class SpeedGame {
     const { engine, renderer } = await createBestEngine(this.canvas);
     this.scene = new Scene(engine);
     this.scene.clearColor = new Color4(0.05, 0.06, 0.07, 1);
+    this.scene.skipPointerMovePicking = true;
 
     say("Waking Havok Physics V2…");
     try {
@@ -251,7 +252,7 @@ export class SpeedGame {
         this.markers.update(frameDt, this.player.position);
         this.city.sky.update(frameDt);
         this.city.palette.update(frameDt, this.city.sky.nightAmount);
-        this.city.updateStreaming(this.player.position);
+        this.city.updateStreaming(this.player.position, this.player.velocity);
         this.cityLife.update(frameDt, this.player.position, this.focusActive ? 0.16 : 1);
         this.routeGhost.update(this.activity instanceof RouteRun ? this.activity.replayPose() : null, this.player.position, !this.save.settings.reducedMotion);
         this.sound.update(frameDt, this.player.speedRatio, this.focusActive, this.city.sky.nightAmount);
