@@ -494,8 +494,8 @@ export function createRoadMaps(scene: Scene, rng: Rng, roadHalfMeters: number): 
 
   // Crosswalks on every intersection approach.
   const zebra = (x: number, y: number, w: number, h: number, vertical: boolean): void => {
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = "rgba(208, 210, 204, 0.82)";
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = "rgba(228, 228, 214, 0.9)";
     if (vertical) {
       for (let sy = y; sy < y + h - 3; sy += 9) {
         ctx.fillRect(x, sy, w, 4.5);
@@ -529,7 +529,7 @@ export function createRoadMaps(scene: Scene, rng: Rng, roadHalfMeters: number): 
     ctx.fillRect(offset, roadHalf + 42, 2, size - roadHalf * 2 - 84);
     ctx.fillRect(roadHalf + 42, offset, size - roadHalf * 2 - 84, 2);
   }
-  ctx.fillStyle = "rgba(67,115,114,0.48)";
+  ctx.fillStyle = "rgba(74,160,151,0.68)";
   const cycle = 2.2 * pxPerM;
   for (const edge of [roadHalf - cycle - 8, size - roadHalf + 8]) {
     ctx.fillRect(edge, roadHalf + 42, cycle, size - roadHalf * 2 - 84);

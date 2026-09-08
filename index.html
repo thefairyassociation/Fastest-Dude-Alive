@@ -142,6 +142,8 @@
             </div>
             <table class="controls-table">
               <tbody>
+                <tr><th>Mouse / IJKL</th><td>Look around · click the game to capture the mouse</td></tr>
+                <tr><th>V</th><td>Recenter camera behind your runner</td></tr>
                 <tr><th>WASD</th><td>Run and steer</td></tr>
                 <tr><th>Shift</th><td>Sprint toward top speed</td></tr>
                 <tr><th>Space</th><td>Jump · in the air, phase dash</td></tr>
@@ -178,6 +180,8 @@
           <div class="objective-progress"><span id="objective-progress-fill"></span></div>
         </div>
 
+        <div id="flow-panel" class="flow-panel is-hidden"><div><span class="eyebrow">Momentum run</span><strong id="flow-score">0</strong></div><span id="flow-detail">Keep moving to build your flow</span><div class="flow-track"><span id="flow-fill"></span></div></div>
+        <div id="navigation" class="navigation is-hidden"><span id="navigation-arrow" aria-hidden="true">↑</span><div><strong id="navigation-name"></strong><small id="navigation-distance"></small></div></div>
         <div id="district-banner" class="district-banner"><span id="district-name"></span></div>
 
         <div class="minimap-wrap">
@@ -208,11 +212,12 @@
         </div>
 
         <div class="abilities" aria-label="Abilities">
-          <div id="ability-dash" class="ability"><kbd>Spc</kbd><span>Dash</span></div>
-          <div id="ability-slide" class="ability"><kbd>Ctrl</kbd><span>Slide</span></div>
-          <div id="ability-bolt" class="ability"><kbd>E</kbd><span>Bolt</span></div>
-          <div id="ability-pulse" class="ability"><kbd>Q</kbd><span>Pulse</span></div>
-          <div id="ability-focus" class="ability"><kbd>F</kbd><span>Focus</span></div>
+          <span class="ability-bar-label">Your abilities</span>
+          <div id="ability-dash" class="ability"><kbd>Spc</kbd><span>Dash</span><small id="ability-dash-status">Ready</small></div>
+          <div id="ability-slide" class="ability"><kbd>Ctrl</kbd><span>Slide</span><small id="ability-slide-status">Ready</small></div>
+          <div id="ability-bolt" class="ability"><kbd>E</kbd><span>Bolt</span><small id="ability-bolt-status">Ready</small></div>
+          <div id="ability-pulse" class="ability"><kbd>Q</kbd><span>Pulse</span><small id="ability-pulse-status">Ready</small></div>
+          <div id="ability-focus" class="ability"><kbd>F</kbd><span>Focus</span><small id="ability-focus-status">Ready</small></div>
         </div>
 
         <div id="rogue-bar" class="rogue-bar is-hidden">
@@ -230,8 +235,8 @@
         </div>
 
         <div id="capture-hint" class="capture-hint">
-          <strong>Click to enter the city</strong>
-          <span>WASD run · Shift sprint · Space jump · run at a wall to climb it</span>
+          <strong>Click for mouse camera · I J K L to look · V to recenter</strong>
+          <span>WASD run · Shift sprint · Space jump / air dash · M destinations</span>
         </div>
 
         <!-- Dialogue -->
@@ -256,7 +261,12 @@
             <div class="map-header"><div><p class="eyebrow">Find your next route</p><h2 id="map-title">Meridian City</h2></div><button id="map-close" class="link-button" type="button">Close map <kbd>M</kbd></button></div>
             <div class="map-layout">
               <div class="map-canvas-wrap"><canvas id="citymap" width="1100" height="1100" aria-label="North-up map of Meridian showing districts, landmarks, objectives and your location" aria-describedby="map-status"></canvas><span class="map-north" aria-hidden="true">↑ N</span></div>
-              <aside class="map-sidebar"><p class="eyebrow">You are here</p><h3 id="map-district">Meridian</h3><p id="map-status" class="map-status">Explore the city.</p><div class="map-legend"><span><i class="legend-player" aria-hidden="true"></i>Your location</span><span><i class="legend-route" aria-hidden="true"></i>Objective / checkpoint</span><span><i class="legend-rescue" aria-hidden="true"></i>Rescue</span><span><i class="legend-mote" aria-hidden="true"></i>Resonance mote</span><span><i class="legend-threat" aria-hidden="true"></i>Threat</span><span><i class="legend-activity" aria-hidden="true"></i>Optional activity</span><span><i class="legend-landmark" aria-hidden="true"></i>Landmark</span></div><p class="map-hint">Your minimap points toward objectives beyond its edge.</p><p class="map-hint">Run into walls to climb. Build speed to cross the water.</p><div class="map-scale"><span>City span</span><small id="map-scale-label"></small></div></aside>
+              <aside class="map-sidebar">
+                <label class="map-filter-label" for="map-filter">Find something to do</label>
+                <select id="map-filter"><option value="all">All destinations</option><option value="route">Time trials</option><option value="rescue">Rescues</option><option value="duel">Duels</option><option value="landmark">Landmarks</option></select>
+                <p class="map-selection" id="map-selection">Select a destination to track it.</p>
+                <button id="map-clear" class="link-button" type="button">Clear destination</button>
+                <div id="map-destinations" class="map-destinations" aria-label="Destinations sorted by distance"></div><p class="eyebrow">You are here</p><h3 id="map-district">Meridian</h3><p id="map-status" class="map-status">Explore the city.</p><div class="map-legend"><span><i class="legend-player" aria-hidden="true"></i>Your location</span><span><i class="legend-route" aria-hidden="true"></i>Objective / checkpoint</span><span><i class="legend-rescue" aria-hidden="true"></i>Rescue</span><span><i class="legend-mote" aria-hidden="true"></i>Resonance mote</span><span><i class="legend-threat" aria-hidden="true"></i>Threat</span><span><i class="legend-activity" aria-hidden="true"></i>Optional activity</span><span><i class="legend-landmark" aria-hidden="true"></i>Landmark</span></div><p class="map-hint">Click a marker or choose a destination. The bearing points directly toward it; choose your own streets and rooftops.</p><p class="map-hint">Run into walls to climb. Build speed to cross the water.</p><div class="map-scale"><span>City span</span><small id="map-scale-label"></small></div></aside>
             </div>
           </div>
         </div>

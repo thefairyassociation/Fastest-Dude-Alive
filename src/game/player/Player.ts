@@ -608,6 +608,9 @@ export class Player {
 
   /* ---------------- abilities and state ---------------- */
 
+  get airDashReady(): boolean { return this.state === "air" && this.airDashAvailable; }
+  get slideReadyToUse(): boolean { return this.state === "ground" && this.slideReady && this.slideCooldown <= 0 && this.speed > 20; }
+
   canStrike(): boolean {
     return this.strikeCooldown <= 0;
   }
