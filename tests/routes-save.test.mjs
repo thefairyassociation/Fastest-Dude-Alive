@@ -79,12 +79,43 @@ test('completed run stores a usable ghost; recovery run finishes practice withou
   route.stop();
   w.player.position.setAll(0);
   route.start(w);
-  route.invalidateReplay();
+  route.noteRecovery();
+  route.update(.01, w);
   route.update(.01, w);
   w.player.position.x = 100;
   assert.equal(route.update(.01, w), 'complete');
   assert.equal(w.save.bestFor('test-route'), best);
   assert.match(route.successMessage(), /practice/);
+});
+
+test('a recovery teleport cannot bank the checkpoint it is swept through', () => {
+  const w = world();
+  const gates = [{ position: new Vector3(400, 0, 0) }, { position: new Vector3(800, 0, 0) }];
+  const route = new RouteRun({ id: 'sweep-route', name: 'Sweep', summary: '', gates });
+  w.player.position.set(300, 0, 0);
+  route.start(w);
+
+  // Run legitimately to just short of the first gate.
+  w.player.position.set(360, 0, 0);
+  route.update(.2, w);
+  assert.match(route.status().title, /1\/2/);
+
+  // Now stall off-route and recover. The snap to the nearest road lands past
+  // the gate, so the swept test would otherwise bank a checkpoint the runner
+  // never reached.
+  route.noteRecovery();
+  w.player.position.set(430, 0, 0);
+  assert.equal(route.update(.016, w), 'running');
+  assert.match(route.status().title, /1\/2/, 'the swept teleport must not advance the gate');
+
+  // Going back and crossing it under their own power still counts, and the
+  // finished run is practice rather than a ranked time.
+  w.player.position.set(400, 0, 0);
+  route.update(.3, w);
+  assert.match(route.status().title, /2\/2/);
+  w.player.position.set(800, 0, 0);
+  assert.equal(route.update(1, w), 'complete');
+  assert.equal(w.save.bestFor('sweep-route'), null);
 });
 
 test('map growth does not move legacy route gates; expansion routes occupy the outer boroughs', () => {

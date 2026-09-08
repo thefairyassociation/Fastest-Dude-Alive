@@ -544,7 +544,7 @@ export class SpeedGame {
     const talking = this.dialogue.active;
 
     if (this.input.consume("map")) { this.toggleMap(); return; }
-    if (this.activity instanceof RouteRun && this.input.peek("recover")) this.activity.invalidateReplay();
+    if (this.activity instanceof RouteRun && this.input.peek("recover")) this.activity.noteRecovery();
     if (talking) {
       // The dialogue shares its advance key with jump, so the player must not
       // read input at all while a conversation is up — it would eat the press.

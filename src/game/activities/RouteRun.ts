@@ -49,6 +49,7 @@ export class RouteRun implements Activity {
   private readonly previous = Vector3.Zero();
   private readonly frames: RouteReplay["frames"] = [];
   private recordingValid = true;
+  private recovered = false;
   private nextSample = 0;
   private replay: RouteReplay | null = null;
   private readonly ghost: GhostPose = [0, 0, 0, 0];
@@ -56,8 +57,17 @@ export class RouteRun implements Activity {
 
   replayPose(): GhostPose | null { return this.ghostVisible ? this.ghost : null; }
 
-  /** A recovery should never turn a teleport into a ranked shortcut. */
-  invalidateReplay(): void { this.recordingValid = false; }
+  /**
+   * Flags the recovery the player just asked for, before the teleport lands.
+   *
+   * A recovery must never turn a teleport into a ranked shortcut, so the run
+   * stops recording a best — and the gap itself is not travel, so the next
+   * step must not sweep a checkpoint the runner never reached.
+   */
+  noteRecovery(): void {
+    this.recordingValid = false;
+    this.recovered = true;
+  }
 
   constructor(private readonly route: RouteDefinition) {
     this.id = route.id;
@@ -77,6 +87,7 @@ export class RouteRun implements Activity {
     this.finishedIn = 0;
     this.frames.length = 0;
     this.recordingValid = true;
+    this.recovered = false;
     this.nextSample = 0.2;
     this.previous.copyFrom(world.player.position);
     this.replay = this.route.recordBest === false ? null : world.save.data.routeReplays[this.route.id] ?? null;
@@ -87,7 +98,12 @@ export class RouteRun implements Activity {
 
   update(dt: number, world: ActivityWorld): ActivityResult {
     this.elapsed += dt;
-    if (Vector3.DistanceSquared(this.previous, world.player.position) > (Math.max(400, world.player.speed) * dt + 8) ** 2) this.recordingValid = false;
+    // A recovery is not travel, and unlike the coarse distance test below it
+    // names the teleport exactly — so it alone breaks gate continuity, leaving
+    // authored respawns to move the runner without dropping a checkpoint.
+    const recovered = this.recovered;
+    this.recovered = false;
+    if (recovered || Vector3.DistanceSquared(this.previous, world.player.position) > (Math.max(400, world.player.speed) * dt + 8) ** 2) this.recordingValid = false;
     this.ghostVisible = this.replay !== null && sampleReplay(this.replay, this.elapsed, this.ghost);
     if (this.elapsed >= this.nextSample && this.frames.length < MAX_REPLAY_FRAMES - 1) {
       this.capture(world);
@@ -98,7 +114,9 @@ export class RouteRun implements Activity {
 
     const radius = gate.radius ?? 16;
     const player = world.player;
-    const crossed = crossesGate(this.previous, player.position, gate.position, radius);
+    // Sweeping across the recovery would bank the checkpoint on the far side of
+    // the gap, so the step is dropped and the next one measures real motion.
+    const crossed = !recovered && crossesGate(this.previous, player.position, gate.position, radius);
     this.previous.copyFrom(player.position);
     if (!crossed) return "running";
 
