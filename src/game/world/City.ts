@@ -257,6 +257,9 @@ interface Chunk {
   mergedSilhouettes: Mesh[];
   mergedBulk: Mesh[];
   mergedDetail: Mesh[];
+  fullVisible?: boolean;
+  horizonVisible?: boolean;
+  detailVisible?: boolean;
 }
 
 export interface MoveResult {
@@ -472,10 +475,19 @@ export class City {
       const near = distanceSq < radiusSq;
       const full = distanceSq < this.structureRadius * this.structureRadius;
       const horizon = !full && distanceSq < this.horizonRadius * this.horizonRadius;
-      for (const mesh of chunk.mergedBulk) if (mesh.isEnabled() !== full) mesh.setEnabled(full);
-      for (const mesh of chunk.mergedSilhouettes) if (mesh.isEnabled() !== horizon) mesh.setEnabled(horizon);
-      for (const mesh of chunk.mergedDetail) {
-        if (mesh.isEnabled() !== near) mesh.setEnabled(near);
+      // Most frames stay in the same LOD bands. Touch meshes only when a
+      // band changes; keep distance checks current even during fast travel.
+      if (chunk.fullVisible !== full) {
+        for (const mesh of chunk.mergedBulk) mesh.setEnabled(full);
+        chunk.fullVisible = full;
+      }
+      if (chunk.horizonVisible !== horizon) {
+        for (const mesh of chunk.mergedSilhouettes) mesh.setEnabled(horizon);
+        chunk.horizonVisible = horizon;
+      }
+      if (chunk.detailVisible !== near) {
+        for (const mesh of chunk.mergedDetail) mesh.setEnabled(near);
+        chunk.detailVisible = near;
       }
     }
   }

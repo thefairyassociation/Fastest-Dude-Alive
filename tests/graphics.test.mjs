@@ -4,6 +4,7 @@ import { createCanvas, Image } from '@napi-rs/canvas';
 import { NullEngine, Scene, FreeCamera, Vector3, VertexBuffer, InternalTexture, InternalTextureSource } from '@babylonjs/core';
 import { HeroModel } from '../src/game/player/HeroModel.ts';
 import { SpeedTrails } from '../src/game/fx/SpeedTrails.ts';
+import { Effects } from '../src/game/fx/Effects.ts';
 import { Palette } from '../src/game/world/Materials.ts';
 import { mulberry32 } from '../src/game/core/Rng.ts';
 import { constrainChaseCamera } from '../src/game/core/ChaseCamera.ts';
@@ -106,6 +107,43 @@ test('speed ribbons are bounded, fade at rest, clear on teleport and respect red
     for (let i = 0; i < 3; i++) trails.update(1 / 60, hero.root.position, 0, 1, false, false);
     for (let i = 0; i < 20; i++) trails.update(1 / 60, hero.root.position, 0, 0, false, false);
     assert.ok(meshes.every(m => !m.isEnabled()), 'trails expire when stopped');
+  } finally { engine.dispose(); }
+});
+
+test('boost effects reuse colors and scene resources through bursts, focus and reset', () => {
+  const { engine, scene } = setup();
+  try {
+    const hero = new HeroModel(scene);
+    const effects = new Effects(scene, hero.ghostSource, 'high', hero.trailAnchors);
+    const player = { position: hero.root.position, root: hero.root, speedRatio: 1 };
+    const slipstream = scene.particleSystems.find(system => system.name === 'slipstream');
+    const sparks = scene.particleSystems.find(system => system.name === 'impact-sparks');
+    const colors = [slipstream.color1, slipstream.color2, sparks.color1, sparks.color2];
+    const meshes = [...scene.meshes], materials = [...scene.materials];
+    for (let frame = 0; frame < 300; frame += 1) {
+      player.position.z += 215 / 60;
+      effects.update(1 / 60, player, frame % 2 === 0);
+      effects.burst(player.position, 8, ['warm', 'cool', 'pale', 'danger'][frame % 4]);
+    }
+    assert.deepEqual(scene.meshes, meshes, 'boost never grows the mesh pool');
+    assert.deepEqual(scene.materials, materials, 'boost never creates materials');
+    const ghosts = scene.meshes.filter(mesh => mesh.name.startsWith('ghost-') && mesh.isEnabled());
+    assert.ok(ghosts.length > 1 && ghosts.length <= 5, 'only a small afterimage pool is drawn');
+    for (const ghost of ghosts) {
+      assert.equal(ghost.geometry, hero.ghostSource.geometry, 'afterimages share geometry');
+      assert.equal(ghost.material, hero.ghostSource.material, 'afterimages share their material');
+      assert.ok(ghost.visibility > 0 && ghost.visibility < 0.23, 'afterimages fade independently');
+    }
+    assert.ok(new Set(ghosts.map(ghost => ghost.visibility)).size > 1, 'older ghosts are fainter');
+    [slipstream.color1, slipstream.color2, sparks.color1, sparks.color2].forEach((color, i) => assert.equal(color, colors[i]));
+    effects.update(1 / 60, player, true);
+    assert.deepEqual(slipstream.color1.asArray(), [0.6, 0.85, 1, 0.9]);
+    effects.burst(player.position, 8, 'danger');
+    assert.deepEqual(sparks.color2.asArray(), [1, 0.28, 0.2, 0.9]);
+    effects.setReducedMotion(true);
+    assert.equal(slipstream.emitRate, 0);
+    effects.reset();
+    assert.ok(scene.meshes.filter(mesh => /^(trail-|ghost-|bolt-|pulse-)/.test(mesh.name)).every(mesh => !mesh.isEnabled()));
   } finally { engine.dispose(); }
 });
 

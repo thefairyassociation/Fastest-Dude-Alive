@@ -1,7 +1,6 @@
 import {
   Color3,
   Color4,
-  InstancedMesh,
   LinesMesh,
   Mesh,
   MeshBuilder,
@@ -46,11 +45,13 @@ const BOLT_POINTS = 6;
 export class Effects {
   private readonly pulses = new Map<PulseTone, Array<Pooled<Mesh>>>();
   private readonly bolts: Array<Pooled<LinesMesh>> = [];
-  private readonly ghosts: Array<Pooled<InstancedMesh>> = [];
+  private readonly ghosts: Array<Pooled<Mesh>> = [];
   private readonly boltPoints: Vector3[][] = [];
   private readonly slipstream: ParticleSystem;
   private readonly sparks: ParticleSystem;
   private readonly emitter: Mesh;
+  private readonly arcOrigin = new Vector3();
+  private readonly arcTarget = new Vector3();
 
   private readonly trails: SpeedTrails;
   private ghostClock = 0;
@@ -109,7 +110,9 @@ export class Effects {
 
     const ghostCount = quality === "low" ? 8 : POOL_GHOSTS;
     for (let i = 0; i < ghostCount; i += 1) {
-      const instance = ghostSource.createInstance(`ghost-${i}`);
+      // Clones share geometry/material but support independent fading.
+      // InstancedMesh.visibility is ignored and logs a warning every tick.
+      const instance = ghostSource.clone(`ghost-${i}`, null, true);
       instance.isPickable = false;
       instance.setEnabled(false);
       this.ghosts.push({ mesh: instance, age: 0, duration: 0.34, grow: 0, alpha: 0.4, active: false });
@@ -242,15 +245,24 @@ export class Effects {
     if (count <= 0) return;
     const emitter = this.sparks.emitter;
     if (emitter instanceof Vector3) emitter.copyFrom(position);
-    const colors: Record<PulseTone, [Color4, Color4]> = {
-      warm: [new Color4(1, 0.9, 0.7, 1), new Color4(1, 0.7, 0.35, 0.9)],
-      cool: [new Color4(0.75, 0.9, 1, 1), new Color4(0.5, 0.7, 1, 0.9)],
-      pale: [new Color4(0.95, 0.97, 1, 1), new Color4(0.8, 0.85, 0.9, 0.85)],
-      danger: [new Color4(1, 0.5, 0.38, 1), new Color4(1, 0.28, 0.2, 0.9)],
-    };
-    const [first, second] = colors[tone];
-    this.sparks.color1 = first;
-    this.sparks.color2 = second;
+    switch (tone) {
+      case "warm":
+        this.sparks.color1.set(1, 0.9, 0.7, 1);
+        this.sparks.color2.set(1, 0.7, 0.35, 0.9);
+        break;
+      case "cool":
+        this.sparks.color1.set(0.75, 0.9, 1, 1);
+        this.sparks.color2.set(0.5, 0.7, 1, 0.9);
+        break;
+      case "pale":
+        this.sparks.color1.set(0.95, 0.97, 1, 1);
+        this.sparks.color2.set(0.8, 0.85, 0.9, 0.85);
+        break;
+      case "danger":
+        this.sparks.color1.set(1, 0.5, 0.38, 1);
+        this.sparks.color2.set(1, 0.28, 0.2, 0.9);
+        break;
+    }
     this.sparks.manualEmitCount = count;
   }
 
@@ -266,11 +278,11 @@ export class Effects {
       this.slipstream.minEmitPower = 1 + ratio * 6;
       this.slipstream.maxEmitPower = 4 + ratio * 18;
       if (focusActive) {
-        this.slipstream.color1 = new Color4(0.6, 0.85, 1, 0.9);
-        this.slipstream.color2 = new Color4(0.35, 0.6, 1, 0.7);
+        this.slipstream.color1.set(0.6, 0.85, 1, 0.9);
+        this.slipstream.color2.set(0.35, 0.6, 1, 0.7);
       } else {
-        this.slipstream.color1 = new Color4(1, 0.82, 0.44, 0.9);
-        this.slipstream.color2 = new Color4(1, 0.6, 0.2, 0.7);
+        this.slipstream.color1.set(1, 0.82, 0.44, 0.9);
+        this.slipstream.color2.set(1, 0.6, 0.2, 0.7);
       }
 
       // Afterimages: cadence tightens as the runner opens up.
@@ -284,9 +296,9 @@ export class Effects {
       this.arcClock -= dt;
       if (ratio > 0.55 && this.arcClock <= 0) {
         this.arcClock = 0.09 + Math.random() * 0.14;
-        const origin = player.position.add(new Vector3(0, 0.9, 0));
-        const target = origin.add(
-          new Vector3((Math.random() - 0.5) * 5, (Math.random() - 0.4) * 3.5, (Math.random() - 0.5) * 5),
+        const origin = this.arcOrigin.copyFrom(player.position).addInPlaceFromFloats(0, 0.9, 0);
+        const target = this.arcTarget.copyFrom(origin).addInPlaceFromFloats(
+          (Math.random() - 0.5) * 5, (Math.random() - 0.4) * 3.5, (Math.random() - 0.5) * 5,
         );
         this.bolt(origin, target);
       }
@@ -310,7 +322,7 @@ export class Effects {
     entry.active = true;
   }
 
-  private tickPool<T extends Mesh | LinesMesh | InstancedMesh>(
+  private tickPool<T extends Mesh>(
     pool: Array<Pooled<T>>,
     dt: number,
     scaleWithGrow: boolean,
@@ -327,7 +339,7 @@ export class Effects {
     }
   }
 
-  private release<T extends Mesh | LinesMesh | InstancedMesh>(entry: Pooled<T>): void {
+  private release<T extends Mesh>(entry: Pooled<T>): void {
     entry.active = false;
     entry.mesh.setEnabled(false);
   }
