@@ -682,8 +682,11 @@ export class SpeedGame {
 
   private handleDown(): void {
     this.player.health = 45;
-    this.player.recover(this.city);
     this.effects.pulse(this.player.position, "danger", 12);
+    // Story already failed the chapter this step. A recover teleport would
+    // yank the runner off a timed rescue/route after the results card is up.
+    if (this.mode === "story") return;
+    this.player.recover(this.city);
     this.hud.toast("Pulled out — you are not invincible");
     if (this.activity) {
       this.activity.stop(this.world);

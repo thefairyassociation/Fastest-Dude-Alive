@@ -297,6 +297,7 @@ export class City {
   private readonly districtSignKeys = new Set<string>();
   private readonly boxBatches = new Map<string, { batch: StaticBoxBatch; x: number; z: number; material: string; detail: boolean }>();
   private readonly scratchNormal = new Vector3();
+  private readonly scratchResolve = { x: 0, z: 0 };
 
   constructor(
     readonly scene: Scene,
@@ -398,6 +399,16 @@ export class City {
         out.hitWall = true;
         out.wallX = 0;
         out.wallZ = stepZ > 0 ? -1 : 1;
+      }
+    }
+
+    const feet = position.y;
+    const head = position.y + height;
+    if (this.grid.overlaps(position.x, position.z, radius, feet, head, stepHeight)) {
+      if (this.grid.depenetrate(position.x, position.z, radius, feet, head, stepHeight, this.scratchResolve)) {
+        position.x = clamp(this.scratchResolve.x, -this.extent + 4, this.extent - 4);
+        position.z = clamp(this.scratchResolve.z, -this.extent + 4, this.extent - 4);
+        out.hitWall = true;
       }
     }
 

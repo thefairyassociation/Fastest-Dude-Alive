@@ -6,7 +6,7 @@ The local launcher serves the production build from `current/dist` at http://127
 
 - Mouse or IJKL looks around; V recenters behind the runner. Keyboard look remains usable if the browser refuses pointer capture.
 - M pauses and opens destinations. Filter, select a marker or a list entry, then close the map and follow the bearing. Arrival within 28 metres clears the selection. The list is keyboard accessible with Tab/Enter; a controller can open/close the map but destination selection still needs keyboard/mouse.
-- Free-roam momentum runs earn points from actual distance above 40 m/s. Each new traversal style increases the multiplier, capped at four. Every 600 points restores 12 energy. There is a 2.5-second slowdown grace period. Recovery resets the chain, while the session best is retained. Activities and story do not receive flow bonuses.
+- Free-roam momentum runs earn points from actual distance above 40 m/s. Each new traversal style increases the multiplier, capped at four. Every 600 points restores 12 energy. There is a 2.5-second slowdown grace period (the chain ends when remaining grace reaches zero, including inexact frame steps). Recovery resets the chain, while the session best is retained. Activities and story do not receive flow bonuses.
 - Ability slots show cooldown seconds, minimum energy, activation conditions and short feedback. Bolt misses and pulse use no longer create central pop-ups.
 
 ## Implementation
@@ -16,6 +16,8 @@ The chase camera smooths its relative boom at a consistent rate and inherits pla
 The city has a higher daytime sun, brighter ambient fill, softer facade normals, clearer crosswalks/cycle lanes and street-facing storefronts. Six batched decorative boxes per inner-city tower share a small set of generated sign materials; building footprints, collision and route gates stay stable. Existing foliage geometry is retained with a brighter palette to stay within the vertex budget. No new asset downloads or dependencies.
 
 Maps render the actual static building footprints. The minimap expands its range from 280 to 620 metres with speed. Destination guidance gives a direct bearing, not a computed street route. Destination selection and flow records are session-only; the save schema is unchanged.
+
+Sprint movement now depenetrates after a sequential X/Z sweep so a corner-cut cannot leave the runner overlapping a building on both axes. New profiles default to Medium graphics (High remains a setting and is preserved on existing saves) so first boot can finish before a High city is requested. Running out of health during a story objective fails the chapter; the panic recover teleport is free-roam only.
 
 ## Verification
 

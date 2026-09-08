@@ -25,7 +25,7 @@ export class MomentumRun {
     if (speed < 40 || distance <= 0) {
       if (this.active) {
         this.grace = Math.max(0, this.grace - dt);
-        if (this.grace === 0) { this.best = Math.max(this.best, this.score); this.reset(); }
+        if (this.grace <= 0) { this.best = Math.max(this.best, this.score); this.reset(); }
       }
       return 0;
     }

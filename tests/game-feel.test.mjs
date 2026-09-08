@@ -52,6 +52,15 @@ test('momentum rewards each distance milestone once and is consistent across ste
   }
 });
 
+test('flow grace expires even when the remaining time is not an exact multiple of dt', () => {
+  const run = new MomentumRun();
+  run.update(1 / 120, 50, 1, 'ground');
+  assert.equal(run.active, true);
+  for (let step = 0; step < 40; step++) run.update(0.07, 0, 0, 'ground');
+  assert.equal(run.active, false);
+  assert.ok(run.best > 0);
+});
+
 test('recovery cannot turn a teleport into a flow reward; blocked motion earns nothing', () => {
   const run = new MomentumRun();
   assert.equal(run.update(1 / 120, 215, 5000, 'ground', true), 0);

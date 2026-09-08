@@ -78,7 +78,7 @@ export interface Profile {
 export const DEFAULT_PROFILE: Profile = {
   version: VERSION,
   settings: {
-    quality: "high",
+    quality: "medium",
     lookSensitivity: 1,
     reducedMotion: false,
     showSpeedInMph: false,
