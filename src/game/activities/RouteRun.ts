@@ -34,6 +34,8 @@ export interface RouteDefinition {
   par?: number;
   /** Campaign deliveries do not consume the free-roam record/ghost budget. */
   recordBest?: boolean;
+  /** Isolates records from earlier movement rules. */
+  recordKey?: string;
 }
 
 export class RouteRun implements Activity {
@@ -53,6 +55,9 @@ export class RouteRun implements Activity {
   private replay: RouteReplay | null = null;
   private readonly ghost: GhostPose = [0, 0, 0, 0];
   private ghostVisible = false;
+  private medal = "";
+
+  private get recordKey(): string { return this.route.recordKey ?? this.route.id; }
 
   replayPose(): GhostPose | null { return this.ghostVisible ? this.ghost : null; }
 
@@ -73,13 +78,14 @@ export class RouteRun implements Activity {
     this.index = 0;
     this.elapsed = 0;
     this.missedGate = false;
-    this.best = this.route.recordBest === false ? null : world.save.bestFor(this.route.id);
+    this.best = this.route.recordBest === false ? null : world.save.bestFor(this.recordKey);
     this.finishedIn = 0;
+    this.medal = "";
     this.frames.length = 0;
     this.recordingValid = true;
     this.nextSample = 0.2;
     this.previous.copyFrom(world.player.position);
-    this.replay = this.route.recordBest === false ? null : world.save.data.routeReplays[this.route.id] ?? null;
+    this.replay = this.route.recordBest === false ? null : world.save.data.routeReplays[this.recordKey] ?? null;
     this.ghostVisible = false;
     this.capture(world);
     world.toast(`${this.route.name} — go`);
@@ -122,7 +128,12 @@ export class RouteRun implements Activity {
       this.capture(world);
       const recording = this.recordingValid && this.elapsed <= 240 && this.frames.length <= MAX_REPLAY_FRAMES
         ? { duration: this.elapsed, frames: this.frames } : undefined;
-      const improved = this.route.recordBest !== false && this.recordingValid && world.save.recordRoute(this.route.id, this.elapsed, recording);
+      const improved = this.route.recordBest !== false && this.recordingValid && world.save.recordRoute(this.recordKey, this.elapsed, recording);
+      if (this.recordingValid && this.route.recordBest !== false && this.route.par) {
+        const rank = this.elapsed <= this.route.par ? 3 : this.elapsed <= this.route.par * 1.35 ? 2 : this.elapsed <= this.route.par * 1.8 ? 1 : 0;
+        this.medal = ["", "Bronze", "Silver", "Gold"][rank]!;
+        world.save.update(profile => { profile.routeMedals[this.recordKey] = Math.max(profile.routeMedals[this.recordKey] ?? 0, rank); });
+      }
       world.toast(
         improved
           ? `New best · ${formatTime(this.elapsed)}`
@@ -143,7 +154,7 @@ export class RouteRun implements Activity {
       : `best ${formatTime(this.best)}${this.replay ? " · personal-best ghost" : ""}`;
     return {
       title: `${this.route.name} · ${Math.min(this.index + 1, this.route.gates.length)}/${this.route.gates.length}`,
-      detail: `${formatTime(this.elapsed)} · ${bestNote}${speedNote}`,
+      detail: `${formatTime(this.elapsed)} · ${bestNote}${speedNote}${this.route.par ? ` · gold ${this.route.par}s / silver ${Math.round(this.route.par * 1.35)}s / bronze ${Math.round(this.route.par * 1.8)}s` : ""}`,
       progress: this.index / this.route.gates.length,
     };
   }
@@ -176,6 +187,7 @@ export class RouteRun implements Activity {
 
   successMessage(): string {
     if (!this.recordingValid) return `${this.route.name} practice complete · recovery used, best unchanged`;
+    if (this.medal) return `${this.medal} · ${this.route.name} · ${formatTime(this.finishedIn)}`;
     const par = this.route.par;
     if (par !== undefined && this.finishedIn <= par) {
       return `${this.route.name} cleared under par — ${formatTime(this.finishedIn)}`;

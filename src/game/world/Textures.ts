@@ -169,8 +169,8 @@ export const FACADE_STYLES: FacadeStyle[] = [
     id: "glass-tower",
     wall: "#477b84",
     streak: "#284f5b",
-    glassTop: "#9ec6ce",
-    glassBottom: "#305965",
+    glassTop: "#789da8",
+    glassBottom: "#486874",
     frame: "#364f58",
     litColor: "#ffd9a0",
     litChance: 0.06,
@@ -178,7 +178,7 @@ export const FACADE_STYLES: FacadeStyle[] = [
     cols: 10,
     windowWidth: 0.94,
     windowHeight: 0.74,
-    roughness: 0.16,
+    roughness: 0.28,
     metallic: 0.28,
     spandrel: "#314c57",
   },
@@ -336,7 +336,7 @@ export function createFacadeMaps(scene: Scene, style: FacadeStyle, rng: Rng): Su
       // Frames sit proud of the wall; glass sits recessed.
       ctx.fillStyle = style.frame;
       ctx.fillRect(x - 2.5, y - 2.5, winW + 5, winH + 5);
-      hgt.fillStyle = "#a8a8a8";
+      hgt.fillStyle = "#969696";
       hgt.fillRect(x - 2.5, y - 2.5, winW + 5, winH + 5);
 
       const glass = ctx.createLinearGradient(0, y, 0, y + winH);
@@ -344,14 +344,14 @@ export function createFacadeMaps(scene: Scene, style: FacadeStyle, rng: Rng): Su
       glass.addColorStop(1, style.glassBottom);
       ctx.fillStyle = glass;
       ctx.fillRect(x, y, winW, winH);
-      hgt.fillStyle = "#5a5a5a";
+      hgt.fillStyle = "#747474";
       hgt.fillRect(x, y, winW, winH);
 
-      roughness.fillStyle = "#303030";
+      roughness.fillStyle = "#686868";
       roughness.fillRect(x, y, winW, winH);
 
       // Per-pane exposure variation sells "many separate windows".
-      ctx.globalAlpha = rng() * 0.24;
+      ctx.globalAlpha = rng() * 0.11;
       ctx.fillStyle = rng() < 0.5 ? "#0c1117" : "#dfe9ef";
       ctx.fillRect(x, y, winW, winH);
       ctx.globalAlpha = 1;
@@ -369,7 +369,7 @@ export function createFacadeMaps(scene: Scene, style: FacadeStyle, rng: Rng): Su
       }
 
       // Mullions inside wide panes.
-      const mullions = style.ribbon ? 16 : Math.max(0, Math.round(winW / 26) - 1);
+      const mullions = style.ribbon ? 8 : Math.max(0, Math.round(winW / 26) - 1);
       for (let m = 1; m <= mullions; m += 1) {
         const mx = x + (winW * m) / (mullions + 1);
         ctx.globalAlpha = 0.4;
@@ -384,23 +384,10 @@ export function createFacadeMaps(scene: Scene, style: FacadeStyle, rng: Rng): Su
     }
   }
 
-  if (style.storefront) {
-    // Bottom eighth of the tile becomes a shopfront band with awnings.
-    const bandY = size - cellH;
-    ctx.fillStyle = style.storefront;
-    ctx.fillRect(0, bandY, size, cellH);
-    hgt.fillStyle = "#8c8c8c";
-    hgt.fillRect(0, bandY, size, cellH * 0.2);
-    for (let x = 0; x < size; x += 64) {
-      ctx.globalAlpha = 0.55;
-      ctx.fillStyle = rng() < 0.5 ? "#8d3a34" : "#2f4a55";
-      ctx.fillRect(x + 4, bandY + 4, 56, 12);
-      ctx.globalAlpha = 0.75;
-      ctx.fillStyle = "#111619";
-      ctx.fillRect(x + 8, bandY + 20, 48, cellH - 28);
-      ctx.globalAlpha = 1;
-    }
-  }
+  // Storefronts are authored once at street level by City, not repeated on
+  // every eighth floor by the tiling facade texture. Preserve the legacy RNG
+  // draws: the original city seed consumed texture generation before layout.
+  if (style.storefront) for (let x = 0; x < size; x += 64) rng();
 
   speckle(ctx, size, 1100, [style.streak, "#000000", "#ffffff"], 0.05, rng, 2);
   speckle(hgt, size, 2400, ["#7a7a7a", "#868686"], 0.35, rng, 2);
@@ -414,7 +401,7 @@ export function createFacadeMaps(scene: Scene, style: FacadeStyle, rng: Rng): Su
   hgt.fillRect(0, 0, 32, 32);
   hgt.fillRect(0, size - 32, 32, 32);
 
-  const maps = publish(scene, `facade-${style.id}`, painter, FACADE_TILE_METERS, 1.25);
+  const maps = publish(scene, `facade-${style.id}`, painter, FACADE_TILE_METERS, 0.65);
   for (const ctx of [emission, roughness]) {
     ctx.fillStyle = ctx === emission ? "#000000" : "#dddddd";
     ctx.fillRect(0, 0, 32, 32); ctx.fillRect(0, size - 32, 32, 32);
@@ -494,8 +481,8 @@ export function createRoadMaps(scene: Scene, rng: Rng, roadHalfMeters: number): 
 
   // Crosswalks on every intersection approach.
   const zebra = (x: number, y: number, w: number, h: number, vertical: boolean): void => {
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = "rgba(208, 210, 204, 0.82)";
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = "rgba(228, 228, 214, 0.9)";
     if (vertical) {
       for (let sy = y; sy < y + h - 3; sy += 9) {
         ctx.fillRect(x, sy, w, 4.5);
@@ -529,7 +516,7 @@ export function createRoadMaps(scene: Scene, rng: Rng, roadHalfMeters: number): 
     ctx.fillRect(offset, roadHalf + 42, 2, size - roadHalf * 2 - 84);
     ctx.fillRect(roadHalf + 42, offset, size - roadHalf * 2 - 84, 2);
   }
-  ctx.fillStyle = "rgba(67,115,114,0.48)";
+  ctx.fillStyle = "rgba(74,160,151,0.68)";
   const cycle = 2.2 * pxPerM;
   for (const edge of [roadHalf - cycle - 8, size - roadHalf + 8]) {
     ctx.fillRect(edge, roadHalf + 42, cycle, size - roadHalf * 2 - 84);

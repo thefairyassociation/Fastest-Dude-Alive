@@ -46,15 +46,15 @@ interface Atmosphere {
 
 const ATMOSPHERES: Record<AtmosphereId, Atmosphere> = {
   golden: {
-    sun: new Vector3(-0.56, -0.43, 0.5).normalize(),
+    sun: new Vector3(-0.46, -0.78, 0.38).normalize(),
     sunColor: new Color3(1, 0.83, 0.64),
     sunIntensity: 2.7,
-    skyColor: new Color3(0.58, 0.73, 0.86),
-    groundColor: new Color3(0.38, 0.39, 0.37),
-    ambientIntensity: 0.7,
+    skyColor: new Color3(0.72, 0.83, 0.95),
+    groundColor: new Color3(0.53, 0.53, 0.49),
+    ambientIntensity: 1.3,
     fogColor: new Color3(0.64, 0.75, 0.81),
     fogDensity: 0.00020,
-    exposure: 1.02,
+    exposure: 1.17,
     cloudAlpha: 0.62,
     cloudTint: new Color3(1, 0.96, 0.9),
     sunGlow: 1,
@@ -237,16 +237,15 @@ export class Sky {
     this.shadows.bias = 0.0003;
     this.shadows.normalBias = 0.08;
     this.shadows.setDarkness(0.12);
-    // NPC casters still use hidden hull proxies with visibility 0. Babylon treats
-    // visibility < 1 as needing alpha blending and drops those submeshes from
-    // the shadow map unless this is on, which is why the actors were casting
-    // nothing at all. Soft transparent shadows stay off, so they cast solid.
-    this.shadows.transparencyShadow = true;
-    this.shadows.enableSoftTransparentShadow = false;
+    // NPC casters use a camera-excluded layer instead of visibility < 1, so
+    // the rest of the city can stay on the opaque shadow path.
+    this.shadows.transparencyShadow = false;
     this.shadows.usePercentageCloserFiltering = true;
     this.shadows.filteringQuality =
       quality === "high" ? ShadowGenerator.QUALITY_HIGH : ShadowGenerator.QUALITY_MEDIUM;
-    this.shadows.autoCalcDepthBounds = true;
+    // Depth-bounds reduction is a full extra scene pass. The setter also
+    // no-ops until a camera exists, so it was never actually helping in play.
+    this.shadows.autoCalcDepthBounds = false;
 
     scene.fogMode = Scene.FOGMODE_EXP2;
 

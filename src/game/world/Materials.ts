@@ -1,5 +1,5 @@
 import { Color3, PBRMaterial, Scene, Texture } from "@babylonjs/core";
-import type { Rng } from "../core/Rng";
+import { mulberry32, type Rng } from "../core/Rng";
 import {
   FACADE_STYLES,
   createFacadeMaps,
@@ -64,11 +64,11 @@ export class Palette {
     this.flat("harbor-blue", "#3c758a", 0.62, 0.3);
     this.flat("leaf-sage", "#637e51", 0.98, 0);
     this.emissive("warm-light", "#efbb7d", 0.85);
-    this.flat("concrete", "#aaa99f", 0.88, 0.02);
+    this.surface("concrete", createSidewalkMaps(scene, mulberry32(0xc0c0)), 0.88, 0.02);
     this.flat("concrete-dark", "#6d6b66", 0.9, 0.02);
     this.flat("trunk", "#4c3a2c", 0.94, 0);
-    this.flat("leaf", "#44582f", 0.96, 0);
-    this.flat("leaf-autumn", "#7d6a2e", 0.96, 0);
+    this.flat("leaf", "#668d43", 0.96, 0);
+    this.flat("leaf-autumn", "#bd813b", 0.96, 0);
     this.flat("steel", "#3a3d40", 0.4, 0.8);
     this.flat("steel-bright", "#8f979d", 0.3, 0.85);
     this.flat("rubber", "#141517", 0.95, 0);
@@ -82,6 +82,7 @@ export class Palette {
     const glass = this.flat("glass", "#4c6272", 0.06, 0.2);
     glass.alpha = 0.42;
     glass.environmentIntensity = 1.8;
+    glass.needDepthPrePass = true;
 
     for (const [index, hex] of ["#b9bdc1", "#24272b", "#d6d7d3", "#6e2822", "#2c3d57", "#565b60"].entries()) {
       this.flat(`car-${index}`, hex, 0.28, 0.15);
@@ -143,7 +144,7 @@ export class Palette {
   private surface(key: string, maps: SurfaceMaps, roughness: number, metallic: number): PBRMaterial {
     const material = new PBRMaterial(key, this.scene);
     material.albedoTexture = maps.albedo;
-    maps.normal.level = 0.85;
+    maps.normal.level = key.startsWith("facade:") ? 0.32 : 0.65;
     material.bumpTexture = maps.normal;
     material.roughness = roughness;
     material.metallic = metallic;

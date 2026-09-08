@@ -11,9 +11,15 @@ let stored = null;
 globalThis.localStorage = { getItem: () => stored, setItem: (_, value) => { stored = value; } };
 const replay = { duration: 2, frames: [[0, 0, 0, 0, 3.1], [1, 10, 4, 20, -3.1], [2, 20, 0, 40, -3]] };
 
+test('new profiles default to medium quality; existing high settings are kept', () => {
+  stored = null;
+  assert.equal(new Save().settings.quality, 'medium');
+  assert.equal(migrate({ settings: { quality: 'high' } }).settings.quality, 'high');
+});
+
 test('v2 progress, route bests and collectible IDs survive migration; old finale unlocks rebuilding', () => {
   const p = migrate({ version: 2, settings: { quality: 'low', lookSensitivity: 2 }, campaign: { unlocked: 12, completed: ['ch12-fastest-dude-alive'] }, routeBests: { 'meridian-loop': 48.2 }, collected: ['mote-12'], topSpeedKph: 730 });
-  assert.equal(p.version, 3);
+  assert.equal(p.version, 4);
   assert.equal(p.campaign.unlocked, 13);
   assert.equal(p.routeBests['meridian-loop'], 48.2);
   assert.deepEqual(p.collected, ['mote-12']);
@@ -114,4 +120,25 @@ test('campaign deliveries do not evict free-roam recordings or advertise unavail
   const legacy = new RouteRun({ id: 'legacy-best', name: 'Legacy', summary: '', gates: [{ position: Vector3.Zero() }] });
   legacy.start(w);
   assert.doesNotMatch(legacy.status().detail, /ghost/);
+});
+
+test('handling revision preserves old times/ghosts and saves medals under separate records', () => {
+  const profile = migrate({ version: 3, routeBests: { 'test-route': 2 }, routeReplays: { 'test-route': replay }, collected: ['mote-1'] });
+  assert.deepEqual(profile.legacyRouteReplays['test-route'], replay);
+  assert.deepEqual(profile.routeReplays, {});
+  stored = JSON.stringify(profile);
+  const w = { ...world(), save: null };
+  stored = JSON.stringify(profile); w.save = new Save();
+  const route = new RouteRun({ id: 'test-route', recordKey: 'flow2-test-route', name: 'Test', summary: '', par: 2, gates: [{ position: Vector3.Zero() }, { position: new Vector3(100, 0, 0) }] });
+  route.start(w); route.update(.01, w);
+  for (let i = 1; i <= 9; i++) { w.player.position.x = i * 10; route.update(.1, w); }
+  assert.match(route.successMessage(), /Gold/);
+  assert.equal(w.save.bestFor('test-route'), 2);
+  assert.ok(w.save.bestFor('flow2-test-route') < 2);
+  assert.equal(w.save.data.routeMedals['flow2-test-route'], 3);
+  w.save.flush();
+  const reloaded = new Save();
+  assert.deepEqual(reloaded.data.legacyRouteReplays['test-route'], replay);
+  assert.equal(reloaded.data.routeMedals['flow2-test-route'], 3);
+  assert.deepEqual(reloaded.data.collected, ['mote-1']);
 });

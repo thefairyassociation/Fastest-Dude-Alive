@@ -47,6 +47,7 @@ export interface Activity {
   readonly id: string;
   readonly name: string;
   readonly summary: string;
+  readonly kind?: "route" | "rescue" | "duel";
   /** Where the free-roam prompt for this activity sits. */
   readonly anchor: Vector3;
   start(world: ActivityWorld): void;

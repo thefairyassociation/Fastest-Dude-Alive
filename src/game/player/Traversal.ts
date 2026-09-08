@@ -13,3 +13,18 @@ export function timeToLanding(height: number, verticalSpeed: number, gravity: nu
   if (height < 0 || verticalSpeed > 0) return Infinity;
   return (verticalSpeed + Math.sqrt(verticalSpeed * verticalSpeed + 2 * gravity * height)) / gravity;
 }
+
+/** One handling revision, shared by tests and the controller. Units: m/s, m/s². */
+export const HANDLING = {
+  runTop: 45, sprintTop: 215, absoluteTop: 280,
+  runAcceleration: 95, sprintAcceleration: 130,
+  brake: 105, countersteerBrake: 260,
+  turnSlow: 13, turnFast: 9, focusAuthority: 1.7,
+  driftAuthority: 1.25, driftDrag: 18, driftReward: 22,
+  roofCarry: 0.85,
+} as const;
+
+/** A reward requires a sustained corner, not repeated button taps. */
+export function cleanDrift(seconds: number, radians: number, speed: number): boolean {
+  return seconds >= 0.35 && seconds <= 2.5 && radians >= 0.55 && speed >= 45;
+}

@@ -1,3 +1,5 @@
+import { CascadeRescue, CourierInterception } from "./activities/Emergency";
+import { buildPlaygroundRoutes } from "./world/Playgrounds";
 import HavokPhysics from "@babylonjs/havok";
 import {
   Color4,
@@ -11,7 +13,7 @@ import {
   Vector3,
 } from "@babylonjs/core";
 import { Input } from "./core/Input";
-import { constrainChaseCamera } from "./core/ChaseCamera";
+import { ChaseBoom, constrainChaseCamera } from "./core/ChaseCamera";
 import { clamp, damp, mulberry32, type Rng } from "./core/Rng";
 import { Save, type Quality } from "./core/Save";
 import { createBestEngine } from "./core/engine";
@@ -25,6 +27,7 @@ import { Markers, type MarkerEntry } from "./fx/Markers";
 import { Rogue, rogueById } from "./npc/Rogue";
 import { Bystander, createBystanderMaterials } from "./npc/Bystander";
 import { Collectibles } from "./activities/Collectibles";
+import { MomentumRun } from "./activities/MomentumRun";
 import { RouteRun } from "./activities/RouteRun";
 import { RescueRun } from "./activities/RescueRun";
 import { RogueDuel } from "./activities/RogueDuel";
@@ -77,6 +80,7 @@ export class SpeedGame {
   private readonly bystanders: Bystander[] = [];
   private bystandersInUse = 0;
 
+  private readonly momentum = new MomentumRun();
   private available: Activity[] = [];
   private activitySites: NonNullable<HudState["activitySites"]> = [];
   private activity: Activity | null = null;
@@ -85,9 +89,14 @@ export class SpeedGame {
   private mode: Mode = "menu";
 
   private accumulator = 0;
+  private readonly chaseBoom = new ChaseBoom();
   private cameraYaw = 0;
   private cameraPitch = 0.16;
+  private lastActivity: Activity | null = null;
+  private retryNotice = 0;
   private cameraRoll = 0;
+  private manualLookGrace = 0;
+  private cameraLead = Vector3.Zero();
   private shake = 0;
   private focusActive = false;
   private saveClock = 0;
@@ -111,6 +120,7 @@ export class SpeedGame {
     const { engine, renderer } = await createBestEngine(this.canvas);
     this.scene = new Scene(engine);
     this.scene.clearColor = new Color4(0.05, 0.06, 0.07, 1);
+    this.scene.skipPointerMovePicking = true;
 
     say("Waking Havok Physics V2…");
     try {
@@ -165,7 +175,7 @@ export class SpeedGame {
 
     this.world = this.createWorld();
     this.available = this.buildFreeRoamActivities();
-    this.activitySites = this.available.map(activity => ({ name: activity.name, position: activity.anchor, kind: activity instanceof RouteRun ? "route" : activity instanceof RescueRun ? "rescue" : "duel" }));
+    this.activitySites = this.available.map(activity => ({ name: activity.name, position: activity.anchor, kind: activity.kind ?? (activity instanceof RouteRun ? "route" : activity instanceof RescueRun ? "rescue" : "duel") }));
     this.applySettings();
 
     this.wireGlobalInput();
@@ -202,9 +212,9 @@ export class SpeedGame {
     processing.toneMappingEnabled = true;
     processing.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
     processing.exposure = 1.1;
-    processing.contrast = 1.12;
+    processing.contrast = 1.06;
     processing.vignetteEnabled = true;
-    processing.vignetteWeight = 0.8;
+    processing.vignetteWeight = 0.35;
     processing.vignetteColor = new Color4(0.03, 0.03, 0.04, 0);
   }
 
@@ -248,7 +258,7 @@ export class SpeedGame {
         this.markers.update(frameDt, this.player.position);
         this.city.sky.update(frameDt);
         this.city.palette.update(frameDt, this.city.sky.nightAmount);
-        this.city.updateStreaming(this.player.position);
+        this.city.updateStreaming(this.player.position, this.player.velocity);
         this.cityLife.update(frameDt, this.player.position, this.focusActive ? 0.16 : 1);
         this.routeGhost.update(this.activity instanceof RouteRun ? this.activity.replayPose() : null, this.player.position, !this.save.settings.reducedMotion);
         this.sound.update(frameDt, this.player.speedRatio, this.focusActive, this.city.sky.nightAmount);
@@ -336,7 +346,7 @@ export class SpeedGame {
 
   private buildFreeRoamActivities(): Activity[] {
     const activities: Activity[] = [];
-    for (const route of buildRoutes(this.city)) activities.push(new RouteRun(route));
+    for (const route of [...buildPlaygroundRoutes(this.city), ...buildRoutes(this.city)]) activities.push(new RouteRun({ ...route, recordKey: `flow2-${route.id}` }));
 
     activities.push(
       new RescueRun(
@@ -375,6 +385,9 @@ export class SpeedGame {
       activities.push(new RogueDuel(rogue, this.city.landmark(landmark).position.clone()));
     }
 
+    const road = (x: number, z: number) => this.city.nearestRoad(new Vector3(x, 0, z));
+    activities.push(new CascadeRescue(road(975, 675), [road(825, 525), road(1125, 975), road(1425, 525), road(1125, -75)]));
+    activities.push(new CourierInterception(road(-525, -2175), [road(-225, -2175), road(75, -2175), road(75, -2475), road(-525, -2475), road(-525, -2175)]));
     return activities;
   }
 
@@ -407,7 +420,9 @@ export class SpeedGame {
     this.player.health = 100;
     this.player.charge = 50;
     this.hud.setVisible(true);
-    this.hud.toast("Meridian City — open");
+    const firstRun = this.available.find(activity => activity.id === "crest-circuit");
+    if (firstRun) this.hud.destination = { name: firstRun.name, position: firstRun.anchor, kind: "route" };
+    this.hud.toast("Find your flow · Shift sprint · hold C to carve, release to launch · F sharpens control");
     this.resume();
   }
 
@@ -438,7 +453,8 @@ export class SpeedGame {
       return;
     }
     this.menu.hidePause();
-    this.startFreeRoam();
+    if (this.activity || this.lastActivity) { this.retryActivity(); this.resume(); }
+    else this.startFreeRoam();
   }
 
   private returnToMenu(): void {
@@ -460,6 +476,8 @@ export class SpeedGame {
   }
 
   private teardownRun(): void {
+    this.lastActivity = null;
+    this.retryNotice = 0;
     this.trackProfile(2);
     this.activity?.stop(this.world);
     this.activity = null;
@@ -471,6 +489,8 @@ export class SpeedGame {
     this.effects.reset();
     this.routeGhost.update(null, this.player.position, false);
     this.focusActive = false;
+    this.hud.destination = null;
+    this.momentum.reset();
     this.dialogue.hide();
     this.peakSpeed = 0;
     this.accumulator = 0;
@@ -542,6 +562,8 @@ export class SpeedGame {
     // Sample pad edges once per step, alongside the keyboard's.
     this.input.poll();
     const talking = this.dialogue.active;
+    const previousPosition = this.player.position.clone();
+    const recovering = this.input.peek("recover");
 
     if (this.input.consume("map")) { this.toggleMap(); return; }
     if (this.activity instanceof RouteRun && this.input.peek("recover")) this.activity.invalidateReplay();
@@ -551,9 +573,9 @@ export class SpeedGame {
       this.focusActive = false;
       this.player.idle(dt, this.city);
     } else {
-      const events = this.player.update(dt, this.input, this.cameraYaw, this.city);
       this.focusActive = this.input.down("focus") && this.player.useFocus(dt);
       this.player.focusHeld = this.focusActive;
+      const events = this.player.update(dt, this.input, this.cameraYaw, this.city);
       this.handlePlayerEvents(events);
       this.handleCombat();
     }
@@ -571,6 +593,15 @@ export class SpeedGame {
     if (this.mode === "story") this.updateStory(dt);
     else this.updateFreeRoam(dt);
 
+    if (this.mode === "free" && !this.activity) {
+      const charge = this.momentum.update(dt, this.player.speed, Vector3.Distance(previousPosition, this.player.position), this.player.flowStyle, recovering || this.player.health <= 0);
+      this.player.charge = Math.min(100, this.player.charge + charge);
+      if (charge > 0) { this.sound.play("pickup"); this.hud.abilityFeedback("ability-focus", `+${charge} energy`); }
+    } else this.momentum.reset();
+    if (this.hud.destination && Vector3.DistanceSquared(this.hud.destination.position, this.player.position) < 28 * 28) {
+      this.hud.toast(`Arrived · ${this.hud.destination.name}`);
+      this.hud.destination = null;
+    }
     if (this.player.health <= 0) this.handleDown();
 
     this.markers.set(this.currentMarkers());
@@ -617,7 +648,22 @@ export class SpeedGame {
     }
   }
 
+  private retryActivity(): void {
+    const activity = this.activity ?? this.lastActivity;
+    if (!activity) return;
+    this.activity?.stop(this.world);
+    this.momentum.reset();
+    this.player.teleport(activity.anchor);
+    this.player.health = 100; this.player.charge = 60;
+    this.resetChaseCamera();
+    this.input.releaseAll();
+    this.activity = activity; this.lastActivity = activity;
+    activity.start(this.world);
+  }
+
   private updateFreeRoam(dt: number): void {
+    this.retryNotice = Math.max(0, this.retryNotice - dt);
+    if (this.input.consume("retry")) { this.retryActivity(); return; }
     // Offer whatever is closest; T starts it, or abandons a running one.
     this.nearestActivity = this.activity ? null : this.findNearestActivity();
 
@@ -628,6 +674,7 @@ export class SpeedGame {
         this.hud.toast("Activity abandoned");
       } else if (this.nearestActivity) {
         this.activity = this.nearestActivity;
+        this.lastActivity = this.activity;
         this.activity.start(this.world);
       } else {
         this.hud.toast("Nothing to start here — look for a marker");
@@ -639,16 +686,31 @@ export class SpeedGame {
 
     const result = activity.update(dt, this.world);
     if (result === "complete") {
-      this.hud.toast(activity.successMessage());
+      this.hud.toast(`${activity.successMessage()} · Enter to retry`);
+      this.retryNotice = 10;
+      this.offerNextActivity(activity);
       this.sound.play("success");
       activity.stop(this.world);
       this.activity = null;
     } else if (result === "failed") {
-      this.hud.toast(`${activity.name} failed`);
+      this.hud.toast(`${activity.name} failed · Enter to retry`);
+      this.retryNotice = 10;
+      this.offerNextActivity(activity);
       this.sound.play("failure");
       activity.stop(this.world);
       this.activity = null;
     }
+  }
+
+  private offerNextActivity(completed: Activity): void {
+    if (this.hud.destination && this.hud.destination.name !== completed.name) return;
+    let next: Activity | null = null, distance = Infinity;
+    for (const candidate of this.available) {
+      if (candidate === completed) continue;
+      const d = Vector3.DistanceSquared(candidate.anchor, this.player.position);
+      if (d < distance) { distance = d; next = candidate; }
+    }
+    if (next) this.hud.destination = { name: next.name, position: next.anchor, kind: next.kind ?? (next instanceof RouteRun ? "route" : next instanceof RescueRun ? "rescue" : "duel") };
   }
 
   private findNearestActivity(): Activity | null {
@@ -661,13 +723,24 @@ export class SpeedGame {
         best = candidate;
       }
     }
+    if (!best) {
+      bestSq = 650 * 650;
+      for (const candidate of this.available) {
+        if (!(candidate instanceof CascadeRescue || candidate instanceof CourierInterception)) continue;
+        const distanceSq = Vector3.DistanceSquared(candidate.anchor, this.player.position);
+        if (distanceSq < bestSq) { best = candidate; bestSq = distanceSq; }
+      }
+    }
     return best;
   }
 
   private handleDown(): void {
     this.player.health = 45;
-    this.player.recover(this.city);
     this.effects.pulse(this.player.position, "danger", 12);
+    // Story already failed the chapter this step. A recover teleport would
+    // yank the runner off a timed rescue/route after the results card is up.
+    if (this.mode === "story") return;
+    this.player.recover(this.city);
     this.hud.toast("Pulled out — you are not invincible");
     if (this.activity) {
       this.activity.stop(this.world);
@@ -693,11 +766,17 @@ export class SpeedGame {
       this.effects.pulse(position, "warm", 9, 0.32);
       this.shake = Math.max(this.shake, 0.5);
     }
+    if (events.driftExited || events.roofCrested) {
+      this.sound.play("dash");
+      this.effects.pulse(position, "cool", 5, 0.25);
+      this.hud.abilityFeedback("ability-slide", events.driftExited ? "Clean exit +6" : "Roof flow");
+    }
+    if (events.cleanLanded) this.effects.burst(position, 6, "warm");
     if (events.footstep) this.sound.play("step");
     if (events.footstep && this.player.speed > 60) this.effects.burst(position, 4, "pale");
     if (events.waterSpray) { this.effects.burst(position, 6, "cool"); this.sound.play("water"); }
     if (events.sank) this.hud.toast("Too slow across the river");
-    if (events.struck) this.hud.flashAbility("ability-dash");
+    if (events.dashed) this.hud.flashAbility("ability-dash");
   }
 
   /* ---------------- combat ---------------- */
@@ -750,7 +829,7 @@ export class SpeedGame {
         if (accepted) player.registerHit(1.5);
         this.hud.flashAbility("ability-bolt");
       } else {
-        this.hud.toast("No target in arc");
+        this.hud.abilityFeedback("ability-bolt", "No target");
       }
     }
 
@@ -773,7 +852,7 @@ export class SpeedGame {
       }
       this.effects.pulse(position, "pale", 30, 0.5);
       this.hud.flashAbility("ability-pulse");
-      if (hits === 0) this.hud.toast("Kinetic pulse");
+      this.hud.abilityFeedback("ability-pulse", hits ? `${hits} hit` : "Released");
     }
   }
 
@@ -842,12 +921,15 @@ export class SpeedGame {
 
   private resetChaseCamera(): void {
     this.player.resetPresentation();
+    this.chaseBoom.reset();
     this.cameraYaw = 0;
     this.cameraPitch = 0.16;
     this.cameraRoll = 0;
+    this.cameraLead.setAll(0);
+    this.manualLookGrace = 0;
     this.shake = 0;
     this.camera.upVector.set(0, 1, 0);
-    this.camera.position.copyFrom(this.player.position).addInPlaceFromFloats(0, 2.6, -4.4);
+    this.camera.position.copyFrom(this.player.position).addInPlace(this.chaseBoom.offset);
     const anchor = this.player.position.add(new Vector3(0, 1.4, 0));
     constrainChaseCamera(this.city.grid, anchor, this.camera.position, this.camera.position);
     this.camera.setTarget(anchor.add(new Vector3(0, 0, 4)));
@@ -882,27 +964,25 @@ export class SpeedGame {
   private updateCamera(dt: number): void {
     if (!this.dialogue.active) {
       const look = this.input.takeLook(dt);
-      this.cameraYaw -= look.x * 0.0022;
-      this.cameraPitch = clamp(this.cameraPitch - look.y * 0.0017, -0.22, 0.5);
+      this.cameraYaw += look.x * 0.0022;
+      this.manualLookGrace = Math.abs(look.x) + Math.abs(look.y) > 0.01 ? 0.7 : Math.max(0, this.manualLookGrace - dt);
+      if (this.input.consume("recenter")) {
+        this.cameraYaw = this.player.root.rotation.y;
+        this.cameraPitch = 0.16;
+      }
+      this.cameraPitch = clamp(this.cameraPitch + look.y * 0.0017, -0.22, 0.5);
     }
 
     const player = this.player;
     const ratio = player.speedRatio;
     const forward = new Vector3(Math.sin(this.cameraYaw), 0, Math.cos(this.cameraYaw));
 
-    // Pull back and drop low as speed rises; the horizon does the work.
-    const distance = 4.4 + ratio * 5.8;
-    const height = 1.8 + ratio * 1.1 + this.cameraPitch * 5;
-    const desired = player.position
-      .subtract(forward.scale(distance))
-      .addInPlaceFromFloats(0, height, 0);
-
-    // Keep above walkable surfaces; the sightline sweep below handles walls.
-    const surface = this.city.groundHeight(desired.x, desired.z, desired.y) + 1.4;
-    if (desired.y < surface) desired.y = surface;
-
-    const smoothing = damp(9 - ratio * 4, dt);
-    Vector3.LerpToRef(this.camera.position, desired, smoothing, this.camera.position);
+    // Inherit every metre the player moves; damping changes only the boom.
+    const offset = this.chaseBoom.update(dt, this.cameraYaw, this.cameraPitch, ratio, this.save.settings.reducedMotion);
+    const desired = player.position.add(offset);
+    const surface = this.city.groundHeight(desired.x, desired.z, desired.y) + 0.6;
+    desired.y = Math.max(desired.y, surface);
+    this.camera.position.copyFrom(desired);
 
     this.shake = Math.max(0, this.shake - dt * 2.4);
     if (this.shake > 0 && !this.save.settings.reducedMotion) {
@@ -920,7 +1000,7 @@ export class SpeedGame {
 
     // Roll the horizon during wall runs — the single clearest read that the
     // player is no longer on the ground.
-    const targetRoll = !this.save.settings.reducedMotion && player.state === "wall" ? player.wallSide * 0.42 : 0;
+    const targetRoll = !this.save.settings.reducedMotion && player.state === "wall" ? player.wallSide * 0.16 : 0;
     this.cameraRoll += (targetRoll - this.cameraRoll) * damp(6, dt);
     const up = Vector3.TransformNormal(
       Vector3.Up(),
@@ -929,14 +1009,20 @@ export class SpeedGame {
     this.camera.upVector.copyFrom(up);
 
     const target = player.position
-      .add(forward.scale(4 + ratio * 12))
-      .addInPlaceFromFloats(0, 1.4 + this.cameraPitch * 2.5, 0);
+      .add(forward.scale(2.4 + ratio * 3))
+      .addInPlaceFromFloats(0, 1.5 - this.cameraPitch * 3, 0);
+    const anticipating = !this.save.settings.reducedMotion && this.manualLookGrace <= 0;
+    const leadScale = anticipating ? Math.min(0.014, 2.5 / Math.max(1, player.speed)) : 0;
+    const leadBlend = this.save.settings.reducedMotion || this.manualLookGrace > 0 ? 1 : damp(5, dt);
+    this.cameraLead.x += (player.velocity.x * leadScale - this.cameraLead.x) * leadBlend;
+    this.cameraLead.z += (player.velocity.z * leadScale - this.cameraLead.z) * leadBlend;
+    target.addInPlace(this.cameraLead);
     this.camera.setTarget(target);
     const targetFov = this.save.settings.reducedMotion ? 0.92 : 0.88 + ratio * 0.28 + (this.focusActive ? 0.03 : 0);
     this.camera.fov += (targetFov - this.camera.fov) * damp(7, dt);
 
     if (this.pipeline.chromaticAberrationEnabled) {
-      this.pipeline.chromaticAberration.aberrationAmount = this.save.settings.reducedMotion ? 0 : ratio * ratio * 3;
+      this.pipeline.chromaticAberration.aberrationAmount = this.save.settings.reducedMotion ? 0 : ratio * ratio * 0.65;
     }
   }
 
@@ -945,6 +1031,7 @@ export class SpeedGame {
     if (this.activity) return this.activity.markers();
 
     const entries: MarkerEntry[] = [];
+    if (this.hud.destination) entries.push({ position: this.hud.destination.position, style: "objective", radius: 12 });
     const mote = this.collectibles.nearest(this.player.position, 220);
     if (mote) entries.push({ position: mote, style: "collectible", radius: 5 });
     if (this.nearestActivity) {
@@ -955,8 +1042,13 @@ export class SpeedGame {
 
   private hudState(): HudState {
     const objective = this.currentObjective();
+    if (this.mode === "free" && !this.activity && this.lastActivity && this.retryNotice > 0) {
+      objective.detail = "Enter: retry · controller: Pause → Restart · M: choose your next run";
+    }
     const rogue = this.rogues.find((candidate) => candidate.alive) ?? null;
     return {
+      cameraYaw: this.cameraYaw,
+      flow: this.mode === "free" && !this.activity ? this.momentum : undefined,
       modeLabel: this.mode === "story" ? `Story · ${this.chapter?.title ?? ""}` : "Free roam",
       objective,
       activitySites: this.mode === "free" ? this.activitySites : undefined,
@@ -987,7 +1079,7 @@ export class SpeedGame {
     if (this.activity) return this.activity.status();
     return {
       title: "Free roam",
-      detail: `${this.city.districtNameAt(this.player.position.x, this.player.position.z)} · press T at a marker`,
+      detail: "M to pick a destination · T to start nearby activities",
     };
   }
 

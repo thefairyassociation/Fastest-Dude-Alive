@@ -1,6 +1,22 @@
 import { Vector3 } from "@babylonjs/core";
 import type { CollisionGrid } from "../world/Collision";
 
+/** Smooth only the camera boom. World translation is inherited in full, so
+ * sprinting cannot create a speed / damping metres-long positional error. */
+export class ChaseBoom {
+  readonly offset = new Vector3(0, 3.1, -6.4);
+
+  reset(): void { this.offset.set(0, 3.1, -6.4); }
+
+  update(dt: number, yaw: number, pitch: number, speedRatio: number, reducedMotion: boolean): Vector3 {
+    const ratio = reducedMotion ? 0 : Math.max(0, Math.min(1, speedRatio));
+    const distance = 6.4 + ratio * 2.4;
+    const desired = new Vector3(-Math.sin(yaw) * distance, 2.3 + pitch * 5 + ratio * 0.8, -Math.cos(yaw) * distance);
+    Vector3.LerpToRef(this.offset, desired, 1 - Math.exp(-24 * Math.max(0, dt)), this.offset);
+    return this.offset;
+  }
+}
+
 /** Pull the camera in along its sightline before the nearest solid.
  * Expanded boxes conservatively protect a small volume around the lens.
  * Sweep the full segment: testing only its endpoint misses thin walls.

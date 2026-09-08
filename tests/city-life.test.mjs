@@ -93,6 +93,38 @@ test('population stays inside expanded city roads, uses seven fixed batches, and
   } finally { engine.dispose(); }
 });
 
+test('sprinting and teleporting budget ambient route validation to one whole loop per frame', () => {
+  const engine = new NullEngine();
+  const scene = new Scene(engine);
+  const city = fakeCity();
+  const life = new CityLife(scene, city, 'high');
+  const focus = new Vector3(75, 0, -2400);
+  // Longest pedestrian/car loop, including both directions. This bounds
+  // collision work without making hardware-dependent frame-time assertions.
+  const queryBudget = Math.max(
+    Math.ceil(blockLoopLength(54.3, 2.5) / 2),
+    Math.ceil(blockLoopLength(69.2, 9) / 5),
+    Math.ceil(blockLoopLength(80.8, 9) / 5),
+  );
+  let maxQueries = 0;
+  try {
+    for (const dt of [1 / 60, 1 / 20]) {
+      focus.set(75, 0, -2400);
+      for (let frame = 0; frame < 600; frame += 1) {
+        if (frame === 300) focus.set(-2400, 0, -2400);
+        focus.z += 215 * dt;
+        if (focus.z > 2600) focus.z = -2400;
+        const before = city.queries;
+        life.update(dt, focus);
+        const queries = city.queries - before;
+        maxQueries = Math.max(maxQueries, queries);
+        assert.ok(queries <= queryBudget, `${queries} collision queries exceed ${queryBudget} at dt=${dt}, frame=${frame}`);
+      }
+    }
+    assert.ok(maxQueries > 0, 'new routes still receive collision validation');
+  } finally { life.dispose(); engine.dispose(); }
+});
+
 class FakeParam {
   value = 0;
   calls = [];

@@ -6,7 +6,11 @@ import type { Rogue } from "../npc/Rogue";
 import type { City } from "../world/City";
 import { BLOCK_PITCH } from "../world/City";
 
+export interface Destination { name: string; position: Vector3; kind: "route" | "rescue" | "duel" | "landmark" }
+
 export interface HudState {
+  cameraYaw?: number;
+  flow?: { score: number; best: number; multiplier: number; progress: number; grace: number; active: boolean };
   modeLabel: string;
   objective: ActivityStatus;
   focusActive: boolean;
@@ -24,7 +28,7 @@ export interface HudState {
 const TRAVERSAL_LABEL: Record<string, string> = {
   wall: "Wall run",
   vertical: "Vertical run",
-  slide: "Slide",
+  slide: "Drift",
   air: "Airborne",
   ground: "",
 };
@@ -66,6 +70,10 @@ export class Hud {
   private readonly citymap = canvas("citymap");
   private readonly citymapCtx: CanvasRenderingContext2D;
 
+  destination: Destination | null = null;
+  private mapFilter = "all";
+  private readonly feedback = new Map<string, { text: string; remaining: number }>();
+  private mapList: Destination[] = [];
   private toastTimer = 0;
   private districtTimer = 0;
   private lastDistrict = "";
@@ -88,11 +96,31 @@ export class Hud {
       if (this.onMapClose) this.onMapClose();
       else this.closeMap();
     });
-    this.mapOverlay.addEventListener("keydown", (event) => {
-      if (event.key === "Tab") {
-        event.preventDefault();
-        element("map-close").focus();
+    element("map-filter").addEventListener("change", () => {
+      this.mapFilter = (element("map-filter") as HTMLSelectElement).value;
+      this.refreshMap();
+    });
+    element("map-clear").addEventListener("click", () => { this.destination = null; this.refreshMap(); });
+    this.citymap.addEventListener("click", (event) => {
+      const rect = this.citymap.getBoundingClientRect();
+      const x = (event.clientX - rect.left) / rect.width * this.citymap.width;
+      const y = (event.clientY - rect.top) / rect.height * this.citymap.height;
+      const scale = (this.citymap.width - 56) / (this.city.extent * 2);
+      let closest: Destination | null = null, distance = 24;
+      for (const site of this.mapList) {
+        const sx = 28 + (site.position.x + this.city.extent) * scale;
+        const sy = this.citymap.height - 28 - (site.position.z + this.city.extent) * scale;
+        const d = Math.hypot(x - sx, y - sy);
+        if (d < distance) { distance = d; closest = site; }
       }
+      if (closest) this.selectDestination(closest);
+    });
+    this.mapOverlay.addEventListener("keydown", (event) => {
+      if (event.key !== "Tab") return;
+      const controls = Array.from(this.mapOverlay.querySelectorAll<HTMLElement>("button:not(:disabled), select"));
+      const first = controls[0], last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
     });
 
     document.addEventListener("pointerlockchange", () => {
@@ -117,7 +145,7 @@ export class Hud {
     this.mapOpen = !this.mapOpen;
     this.mapOverlay.classList.toggle("is-hidden", !this.mapOpen);
     if (this.mapOpen) {
-      if (this.lastPlayer && this.lastState) this.drawCityMap(this.lastPlayer, this.lastState);
+      this.refreshMap();
       element("map-close").focus({ preventScroll: true });
     }
     return this.mapOpen;
@@ -139,6 +167,48 @@ export class Hud {
     this.toastTimer = window.setTimeout(() => {
       this.toastElement.classList.remove("active");
     }, 1900);
+  }
+
+  abilityFeedback(id: string, text: string): void {
+    this.feedback.set(id, { text, remaining: 0.9 });
+    this.flashAbility(id);
+  }
+
+  private selectDestination(site: Destination): void {
+    this.destination = site;
+    this.refreshMap();
+  }
+
+  private refreshMap(): void {
+    if (!this.lastPlayer || !this.lastState) return;
+    const player = this.lastPlayer;
+    const destinations: Destination[] = [
+      ...(this.lastState.activitySites ?? []),
+      ...this.city.landmarks.map(site => ({ name: site.name, position: site.position, kind: "landmark" as const })),
+    ];
+    this.mapList = destinations.filter(site => this.mapFilter === "all" || site.kind === this.mapFilter)
+      .sort((a, b) => Vector3.DistanceSquared(a.position, player.position) - Vector3.DistanceSquared(b.position, player.position));
+    const list = element("map-destinations");
+    const focused = document.activeElement as HTMLElement | null;
+    const focusedName = list.contains(focused) ? focused?.dataset.destination : undefined;
+    list.replaceChildren();
+    for (const site of this.mapList) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "destination-button";
+      button.dataset.destination = site.name;
+      button.setAttribute("aria-pressed", String(site === this.destination || site.name === this.destination?.name));
+      const name = document.createElement("strong"); name.textContent = site.name;
+      const detail = document.createElement("small");
+      detail.textContent = `${site.kind === "route" ? "Time trial" : site.kind === "duel" ? "Duel" : site.kind === "rescue" ? "Rescue" : "Landmark"} · ${formatDistance(Vector3.Distance(site.position, player.position))}`;
+      button.append(name, detail);
+      button.addEventListener("click", () => this.selectDestination(site));
+      list.append(button);
+      if (focusedName === site.name) button.focus({ preventScroll: true });
+    }
+    element("map-selection").textContent = this.destination ? `Tracking ${this.destination.name}` : "Select a destination to track it.";
+    (element("map-clear") as HTMLButtonElement).disabled = !this.destination;
+    this.drawCityMap(player, this.lastState);
   }
 
   flashAbility(id: string): void {
@@ -181,11 +251,41 @@ export class Hud {
     this.traversal.textContent = label;
     this.traversal.classList.toggle("active", label !== "");
 
-    setReady("ability-dash", player.charge >= 18 && player.dashCooldown <= 0);
-    setReady("ability-slide", player.speed > 20);
-    setReady("ability-bolt", player.canBolt());
-    setReady("ability-pulse", player.canPulse());
-    setReady("ability-focus", player.charge > 0);
+    for (const [id, feedback] of this.feedback) {
+      feedback.remaining -= dt;
+      if (feedback.remaining <= 0) this.feedback.delete(id);
+    }
+    const ability = (id: string, cooldown: number, cost: number, available = true, active = false, hint = "Ready") => {
+      const ready = cooldown <= 0 && player.charge >= cost && available;
+      setReady(id, ready);
+      const target = element(id);
+      target.classList.toggle("engaged", active);
+      target.style.setProperty("--cooldown", String(Math.max(0, Math.min(1, cooldown / (id === "ability-pulse" ? 2.8 : id === "ability-bolt" ? 1.1 : 0.7)))));
+      const status = active ? "Active" : cooldown > 0 ? `${cooldown.toFixed(1)}s` : player.charge < cost ? `${cost} energy` : hint;
+      element(`${id}-status`).textContent = this.feedback.get(id)?.text ?? status;
+    };
+    ability("ability-dash", player.dashCooldown, 18, player.airDashReady, player.dashing, player.state !== "air" ? "In air" : player.airDashReady ? "Ready" : "Land first");
+    ability("ability-slide", 0, 0, player.slideReadyToUse, player.state === "slide", player.speed <= 20 ? "Run first" : player.slideReadyToUse ? "Ready" : "Recover");
+    ability("ability-bolt", player.boltCooldown ?? 0, 15);
+    ability("ability-pulse", player.pulseCooldown ?? 0, 35);
+    ability("ability-focus", 0, 1, true, state.focusActive, "Hold");
+
+    const flow = state.flow;
+    element("flow-panel").classList.toggle("is-hidden", !flow || !flow.active);
+    if (flow) {
+      element("flow-score").textContent = `${Math.floor(flow.score).toLocaleString()} ×${flow.multiplier}`;
+      element("flow-detail").textContent = flow.active
+        ? `${flow.grace < 2.5 ? "Keep moving!" : "Chain drifts, roofs & airtime"} · 600 flow = +12 energy`
+        : `Sprint to start · session best ${Math.floor(flow.best).toLocaleString()}`;
+      element("flow-fill").style.transform = `scaleX(${flow.progress})`;
+    }
+    element("navigation").classList.toggle("is-hidden", !this.destination);
+    if (this.destination) {
+      const dx = this.destination.position.x - player.position.x, dz = this.destination.position.z - player.position.z;
+      element("navigation-name").textContent = this.destination.name;
+      element("navigation-distance").textContent = `${formatDistance(Math.hypot(dx, dz))} · direct bearing · M to change`;
+      element("navigation-arrow").style.transform = `rotate(${Math.atan2(dx, dz) - (state.cameraYaw ?? player.root.rotation.y)}rad)`;
+    }
 
     this.moteCount.textContent = `${state.motesFound} / ${state.motesTotal}`;
 
@@ -247,7 +347,7 @@ export class Hud {
     const ctx = this.minimapCtx;
     const size = this.minimap.width;
     const half = size / 2;
-    const range = 320;
+    const range = 280 + Math.min(1, player.speedRatio) * 340;
     const scale = half / range;
     const px = player.position.x;
     const pz = player.position.z;
@@ -384,7 +484,7 @@ export class Hud {
     // Labels get a dark backing for legibility over roads and district tints.
     const labels: Array<{ x: number; y: number; width: number; height: number }> = [];
     const label = (name: string, x: number, y: number, color: string, priority = false) => {
-      ctx.font = "500 16px Inter, sans-serif";
+      ctx.font = "500 19px Inter, sans-serif";
       const width = ctx.measureText(name).width + 10;
       const bx = Math.max(5, Math.min(size - width - 5, x - width / 2));
       const by = Math.max(5, y - 31);
@@ -398,6 +498,7 @@ export class Hud {
     };
 
     for (const site of state.activitySites ?? []) {
+      if (this.mapFilter !== "all" && this.mapFilter !== site.kind) continue;
       const x = toX(site.position.x);
       const y = toY(site.position.z);
       const color = activityColor(site.kind);
@@ -405,6 +506,7 @@ export class Hud {
       label(site.name, x, y, color);
     }
     for (const landmark of this.city.landmarks) {
+      if (this.mapFilter !== "all" && this.mapFilter !== "landmark") continue;
       const x = toX(landmark.position.x);
       const y = toY(landmark.position.z);
       drawMapSymbol(ctx, x, y, 3.5, "#a9bbc5", false, true);
@@ -415,6 +517,14 @@ export class Hud {
     }
     if (state.rogue?.alive) drawMapSymbol(ctx, toX(state.rogue.position.x), toY(state.rogue.position.z), 9, "#f67b70", true, true);
 
+    if (this.destination) {
+      const x = toX(this.destination.position.x), y = toY(this.destination.position.z);
+      ctx.strokeStyle = "#98ede1";
+      ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(toX(player.position.x), toY(player.position.z)); ctx.lineTo(x, y); ctx.stroke();
+      drawMapSymbol(ctx, x, y, 17, "#98ede1");
+      label(this.destination.name, x, y - 12, "#b7fff1", true);
+    }
     const playerX = toX(player.position.x);
     const playerY = toY(player.position.z);
     ctx.strokeStyle = "rgba(239, 189, 121, .36)";
@@ -482,6 +592,12 @@ export class Hud {
         ctx.fillRect(toX(x - 56), toY(z + 56), 112 * scale, 112 * scale);
       }
     }
+    // Actual solid footprints reveal courtyards and roof routes at city scale.
+    this.city.grid?.query(-extent, -extent, extent, extent, solid => {
+      if (solid.top < 4 || solid.maxX - solid.minX < 8 || solid.maxZ - solid.minZ < 8) return;
+      ctx.fillStyle = solid.top > 80 ? "#738c96" : "#536c77";
+      ctx.fillRect(toX(solid.minX), toY(solid.maxZ), (solid.maxX - solid.minX) * scale, (solid.maxZ - solid.minZ) * scale);
+    });
     // Query actual water so the map includes bridge breaks without a second layout.
     const tile = BLOCK_PITCH / 3;
     ctx.fillStyle = "#1b4859";

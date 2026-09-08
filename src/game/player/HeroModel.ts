@@ -36,6 +36,8 @@ export interface PoseInput {
   /** 0..1 against sprint top speed. */
   speedRatio: number;
   grounded: boolean;
+  braking?: boolean;
+  accelerating?: boolean;
   /** -1 wall on the left, 1 wall on the right, 0 none. */
   wallSide: number;
   /** True while running straight up a facade. */
@@ -54,6 +56,9 @@ export class HeroModel {
   /** Low-poly merged silhouette, instanced for speed afterimages. */
   readonly ghostSource: Mesh;
   readonly trailAnchors: TransformNode[];
+
+  /** Half-stride count aligns footsteps with the visible gait. */
+  get footPlantIndex(): number { return Math.floor(this.stride / Math.PI); }
 
   private readonly body: TransformNode;
   private readonly spine: TransformNode;
@@ -319,12 +324,12 @@ export class HeroModel {
     this.crouch = lerp(this.crouch, targetCrouch, damp(14, dt));
     this.pitch = lerp(this.pitch, targetPitch, damp(9, dt));
 
-    const lean = input.speedRatio * 0.5 + pace * 0.12;
+    const lean = input.braking ? -0.35 : input.speedRatio * 0.5 + pace * 0.12 + (input.accelerating ? 0.22 : 0);
     const airborne = !input.grounded && !input.verticalRun && input.wallSide === 0;
 
     /* -------- root body -------- */
     this.body.rotation.x = lean * 0.55 + this.pitch;
-    this.body.rotation.z = this.roll + swingL * 0.03 * pace - clamp(input.turn, -1, 1) * 0.22;
+    this.body.rotation.z = this.roll + swingL * 0.03 * pace - clamp(input.turn, -1, 1) * (input.sliding ? 0.48 : 0.30);
     this.body.position.y =
       Math.cos(p * 2) * 0.032 * pace * (input.grounded ? 1 : 0) - this.crouch * 0.42;
 

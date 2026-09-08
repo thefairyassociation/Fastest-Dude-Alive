@@ -130,7 +130,7 @@ test('a held slide cannot automatically restart or harvest repeated speed boosts
     const slide = controls({ z: 1, sprint: true, slide: true });
     player.update(STEP, slide, 0, terrain());
     assert.equal(player.state, 'slide');
-    assert.ok(player.speed > 215);
+    assert.equal(player.speed, 215, "entry alone never grants a boost");
     for (let frame = 0; frame < 600; frame++) player.update(STEP, slide, 0, terrain());
     assert.equal(player.state, 'ground');
     assert.ok(player.speed <= 215);
@@ -360,5 +360,77 @@ test('boss warnings and slow fields reuse bounded meshes and release every owned
     assert.equal(scene.meshes.length, baselineMeshes);
     assert.equal(scene.materials.length, baselineMaterials, scene.materials.map(material => material.name).join(', '));
     assert.ok(meshes.every(mesh => mesh.isDisposed()));
+  } finally { engine.dispose(); }
+});
+
+test('new sprint reaches 90 percent in 1.5s and Focus sharpens a high-speed corner', () => {
+  const { engine, scene } = sceneFixture();
+  try {
+    const p = new Player(scene, Vector3.Zero());
+    for (let i = 0; i < 180; i++) p.update(STEP, controls({ z: 1, sprint: true }), 0, terrain());
+    assert.ok(p.speed >= 193.5 && p.speed <= 215);
+    const corner = focus => {
+      p.teleport(Vector3.Zero()); p.velocity.z = 215; p.focusHeld = focus;
+      for (let i = 0; i < 24; i++) p.update(STEP, controls({ x: 1, sprint: true }), 0, terrain());
+      return Math.atan2(p.velocity.x, p.velocity.z);
+    };
+    const normal = corner(false), focused = corner(true);
+    assert.ok(normal > 1.2, `ordinary steering turns ${normal} radians within 0.2s`);
+    assert.ok(focused > normal && focused <= Math.PI / 2);
+  } finally { engine.dispose(); }
+});
+
+test('drift rewards an actual sustained corner once; tapping and straight slides earn nothing', () => {
+  const { engine, scene } = sceneFixture();
+  try {
+    const p = new Player(scene, Vector3.Zero());
+    const attempt = (frames, turning) => {
+      p.teleport(Vector3.Zero()); p.velocity.z = 150;
+      p.update(STEP, controls({ z: 1, sprint: true, slide: true }), 0, terrain());
+      for (let i = 0; i < frames; i++) p.update(STEP, controls({ x: turning ? 1 : 0, z: turning ? 0 : 1, sprint: true, slide: true }), 0, terrain());
+      const speed = p.speed;
+      const rewarded = p.update(STEP, controls({ x: 1, sprint: true }), 0, terrain()).driftExited;
+      if (rewarded) assert.ok(p.speed > speed + 20);
+      assert.equal(p.update(STEP, controls({ x: 1, sprint: true }), 0, terrain()).driftExited, false);
+      return rewarded;
+    };
+    assert.equal(attempt(60, true), true);
+    assert.equal(attempt(1, true), false);
+    assert.equal(attempt(60, false), false);
+  } finally { engine.dispose(); }
+});
+
+test('wall crest carries entry momentum through a collision sweep and seam grace expires', () => {
+  const { engine, scene } = sceneFixture();
+  try {
+    const p = new Player(scene, new Vector3(0, 100, 0));
+    p.wallNormal.set(0, 0, -1); p.beginVerticalRun(200);
+    let sweeps = 0;
+    const city = terrain(); const move = city.move;
+    city.move = (...args) => { sweeps++; move(...args); };
+    assert.equal(p.update(STEP, controls(), 0, city).roofCrested, true);
+    assert.ok(p.velocity.z >= 170);
+    assert.ok(sweeps >= 2, 'lip movement and regular integration both sweep');
+    p.state = 'wall'; p.wallTimer = 2; p.wallSeamGrace = .1;
+    p.update(STEP, controls(), 0, city);
+    assert.equal(p.state, 'wall');
+    for (let i = 0; i < 15; i++) p.update(STEP, controls(), 0, city);
+    assert.equal(p.state, 'air');
+  } finally { engine.dispose(); }
+});
+
+test('courier follows its committed loop, warns a sweep, and opens a recovery window', () => {
+  const { engine, scene } = sceneFixture();
+  try {
+    const rogue = new Rogue(scene, rogueById('vantage'), Vector3.Zero());
+    rogue.configureCourier([Vector3.Zero(), new Vector3(600, 0, 0), new Vector3(600, 0, 300), new Vector3(0, 0, 300)]);
+    let warnings = 0, openings = 0;
+    for (let i = 0; i < 120 * 7; i++) {
+      const result = rogue.update(STEP, new Vector3(1000, 0, 1000), 0);
+      warnings += Number(result.telegraph); openings += Number(rogue.vulnerable);
+      assert.ok(rogue.position.z >= -.1 && rogue.position.z <= 300.1);
+      assert.ok(rogue.position.x >= -.1 && rogue.position.x <= 600.1);
+    }
+    assert.ok(warnings >= 1); assert.ok(openings > 100, 'long enough to close the gap');
   } finally { engine.dispose(); }
 });

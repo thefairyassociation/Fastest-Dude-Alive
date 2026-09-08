@@ -92,6 +92,7 @@ export class CityLife {
   private readonly blockLimit: number;
   private readonly blockColumns: number;
   private quality: Quality;
+  private routeChecksRemaining = 0;
 
   constructor(private readonly scene: Scene, private readonly city: City, quality: Quality) {
     this.quality = quality;
@@ -114,6 +115,9 @@ export class CityLife {
     const realDt = Math.min(0.1, dt);
     const step = realDt * Math.min(1, Math.max(0, timeScale));
     const budget = CITY_LIFE_BUDGETS[this.quality];
+    // Entering new blocks at sprint speed must not validate several whole
+    // loops in one frame. Cached routes remain available to both pools.
+    this.routeChecksRemaining = 1;
     this.updatePool(this.cars, budget.cars, focus, budget.radius, step, realDt, true);
     this.updatePool(this.pedestrians, budget.pedestrians, focus, budget.radius, step, realDt, false);
     for (let i = 0; i < this.cars.length; i += 1) {
@@ -197,7 +201,11 @@ export class CityLife {
       if (Math.hypot(actor.x - focus.x, actor.z - focus.z) < 32) continue;
       if (pool.some(other => other !== actor && other.active && Math.hypot(other.x - actor.x, other.z - actor.z) < (car ? 15 : 3))) continue;
       const key = ((gz + this.blockLimit) * this.blockColumns + gx + this.blockLimit) * 3 + (car ? actor.direction > 0 ? 0 : 1 : 2);
-      if (!this.routeValidity[key]) this.routeValidity[key] = this.routeClear(actor, car) ? 1 : 2;
+      if (!this.routeValidity[key]) {
+        if (this.routeChecksRemaining === 0) continue;
+        this.routeChecksRemaining -= 1;
+        this.routeValidity[key] = this.routeClear(actor, car) ? 1 : 2;
+      }
       if (this.routeValidity[key] !== 1) continue;
       actor.y = car ? 0 : KERB_Y;
       actor.yaw = this.pose.yaw + (actor.direction < 0 ? Math.PI : 0);

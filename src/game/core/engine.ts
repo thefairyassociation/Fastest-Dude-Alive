@@ -8,7 +8,8 @@ export interface EngineResult {
 }
 
 export async function createBestEngine(canvas: HTMLCanvasElement): Promise<EngineResult> {
-  if (await WebGPUEngine.IsSupportedAsync) {
+  const forceWebGL = new URLSearchParams(window.location.search).get("renderer") === "webgl";
+  if (!forceWebGL && await WebGPUEngine.IsSupportedAsync) {
     try {
       const engine = new WebGPUEngine(canvas, {
         antialias: true,

@@ -62,6 +62,8 @@ export class SpeedTrails {
     if (reduced) return;
     this.material.emissiveColor.set(focus ? 0.35 : 1.8, focus ? 1.3 : 0.8, focus ? 2 : 0.25);
     const emitting = speed > 0.16;
+    const cosYaw = Math.cos(yaw);
+    const sinYaw = Math.sin(yaw);
     for (const ribbon of this.ribbons) {
       for (let i = 0; i < ribbon.count; i++) ribbon.ages[i] = ribbon.ages[i]! + dt;
       while (ribbon.count > 0 && ribbon.ages[ribbon.count - 1]! >= LIFETIME) ribbon.count--;
@@ -84,9 +86,9 @@ export class SpeedTrails {
         for (let side = 0; side < 2; side++) {
           const sign = side === 0 ? -1 : 1;
           const p = i * 6 + side * 3, c = i * 8 + side * 4;
-          ribbon.positions[p] = sample.x + Math.cos(yaw) * width * sign;
+          ribbon.positions[p] = sample.x + cosYaw * width * sign;
           ribbon.positions[p + 1] = sample.y + width * sign * 0.3;
-          ribbon.positions[p + 2] = sample.z - Math.sin(yaw) * width * sign;
+          ribbon.positions[p + 2] = sample.z - sinYaw * width * sign;
           ribbon.colors[c] = 1; ribbon.colors[c + 1] = 1; ribbon.colors[c + 2] = 1;
           ribbon.colors[c + 3] = fade * fade * 0.7;
         }

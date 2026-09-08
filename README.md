@@ -4,6 +4,16 @@ An original, browser-first speedster game built with TypeScript and Babylon.js. 
 
 **Current build:** a 5.55 km-wide Meridian, ten districts, fifteen landmarks, independent free roam and a fifteen-chapter campaign, **Minutes Owed**. The recently rebuilt crimson speedster is retained; the overhaul concentrates on the world, presentation, responsiveness and things to do.
 
+## Speedster playgrounds
+
+The latest pass makes sprint reach 90% speed in 1.5 seconds, sharpens steering and Focus control, and carries momentum over roof crests. Hold Ctrl/C to carve a drift; a sustained clean corner earns an exit burst and energy when released. Footsteps follow the visible gait, with new acceleration and braking poses.
+
+Three new repeatable courses — **Crest Circuit**, **River Rush**, and **Foundry Flow** — connect street corners, rooftops, water crossings and optional shortcuts. They have gold/silver/bronze targets and personal-best ghosts. Free roam initially points toward Crest Circuit; **Enter** retries the active or last activity. Controller players can use Pause → Restart.
+
+Two opt-in emergencies add a reason to use those powers: **Cascade Rescue** lets you save four people in any order while Focus delays grid surges; **Courier Interception** sends Switchback around a committed foundry road loop, with jumpable sweeps and recovery windows. Calls become available within 650 m; nothing starts without T. Finishing a run offers another nearby destination.
+
+The city keeps its footprint and campaign, with simpler rooflines, street-level storefronts, quieter glass facades, tiled roof materials and smaller waypoint beams. Version-four saves preserve old times and archive old ghosts separately from the new handling records. See [implementation and playtest notes](docs/SPEEDSTER-PLAYGROUNDS.md).
+
 ## Play
 
 ```bash
@@ -20,12 +30,16 @@ The whole city is open immediately, independently of campaign progress.
 - **37 × 37 blocks**, up from 25 × 25: 2.19 times the previous square map area. The original inner-city tower footprints, roof heights and landmark approaches are retained.
 - **Ten districts:** the Crest, Halcyon Row, Old Meridian, Kestrel Docks, Marrow Hill and Midtown, plus Northline, Westhaven, the Foundry Belt and Saltmere.
 - **Fifteen landmarks**, including a northern observatory and railway station, Westhaven reservoir, a foundry exchange, the Saltmere freight terminal and Beacon Point.
-- **Nine time trials:** Meridian Loop, Riverline Sprint, Crest Ladder, Kestrel Courier, Northline Express, Westhaven Circuit, Foundry Night Shift, Saltmere Coast and Five Bridges. The four original course geometries keep existing personal bests comparable.
+- **Twelve time trials:** Crest Circuit, River Rush and Foundry Flow join Meridian Loop, Riverline Sprint, Crest Ladder, Kestrel Courier, Northline Express, Westhaven Circuit, Foundry Night Shift, Saltmere Coast and Five Bridges. Earlier course geometries remain intact; the new handling uses separate records.
 - **Personal-best ghosts:** a cyan pace runner follows your fastest recorded run. Recordings stay in your browser, at five samples per second, up to four minutes and eight courses. Times remain saved when older ghosts are evicted. Recovery-assisted runs finish as practice and do not overwrite a best.
 - **Six rescues:** Warehouse Collapse, Container Stack Failure, Last Train Out, Reservoir Evacuation, Shift Change and The Stranded Ferry.
 - **112 resonance motes.** The original 64 IDs and placement distribution are retained; another 48 populate the outer boroughs.
 - **Six opt-in duels**, including Vantage at Beacon Point. Combat begins only when you start an encounter.
 - Moving traffic and walking citizens populate the streets around you, independently of rescue actors. They are ambient scenery rather than collision obstacles.
+
+Press **M** to inspect the full city, filter time trials/rescues/duels/landmarks, and select a destination from the distance-sorted list or its map marker. A compass bearing, distance and world beacon guide you there. The bearing is direct, so choose your own streets or rooftops. Clear the destination in the map; arriving within 28 m clears it automatically.
+
+Free roam also has **Momentum runs**: travel above 40 m/s to earn flow from distance, chain different traversal styles for up to ×4, and earn 12 energy every 600 points. Slowing down gives you 2.5 seconds to recover before banking the chain. Your session best remains visible; this bonus is disabled in activities and the campaign. Recovery cancels a chain.
 
 Press **M** to inspect the full city and activity markers. Opening the map pauses the world and releases the mouse; close it with M, Escape, the controller map/pause buttons or its close button. Approach an activity and press **T** to start; T again abandons it.
 
@@ -47,15 +61,17 @@ The authored script, cast and campaign runner live in `src/game/story/`. See [st
 
 ## Movement and combat
 
-Momentum, heavy steering at speed, wall running, vertical running, water running, slide, air dash and focus remain the foundation.
+Responsive momentum steering, wall running, vertical running, water running, drift, air dash and focus remain the foundation.
 
 | Input | Action |
 | --- | --- |
 | WASD / left stick | Run and steer; analog stick deflection controls walking speed |
 | Shift | Sprint toward approximately 215 m/s / 775 km/h |
 | Space | Jump; in the air, phase dash; on a wall, kick away |
-| Ctrl / C | Slide while moving; release before starting another slide |
-| Mouse / right stick | Look |
+| Ctrl / C | Hold to drift; release after a clean corner for an exit burst |
+| Enter | Retry the active or last free-roam activity |
+| Mouse / right stick / IJKL | Look (IJKL works without mouse capture) |
+| V | Recenter camera behind the runner |
 | Left click | Speed strike |
 | E | Arc bolt |
 | Q | Kinetic pulse |
@@ -65,11 +81,11 @@ Momentum, heavy steering at speed, wall running, vertical running, water running
 | M | Pause and inspect the city map |
 | Escape | Pause / resume |
 
-Jump buffering and a short coyote window make landing transitions more forgiving. Opposite steering now brakes into a turn instead of getting stuck on an exactly reversed heading. Holding slide no longer repeatedly grants its entry boost. Gamepad camera rotation uses elapsed time rather than frame count.
+Jump buffering and a short coyote window make landing transitions more forgiving. Opposite steering now brakes into a turn instead of getting stuck on an exactly reversed heading. Drift rewards require a sustained corner and a collision-free release; entry alone grants no boost. Gamepad camera rotation uses elapsed time rather than frame count.
 
 Attacks commit to the position shown by their warning, allowing a dodge. Charges follow a committed lane; Vantage alternates charges with jumpable expanding ground sweeps at low health. The HUD gives the current counterplay cue. Speed strikes and body checks retain their recovery windows.
 
-Gamepad: A jump, B slide, X strike, Y bolt, bumpers focus/pulse, left-stick click sprint, View activity, right-stick click toggles the map, Start pause / close map. Menus support controller and keyboard navigation.
+Gamepad: A jump, B drift, X strike, Y bolt, bumpers focus/pulse, left-stick click sprint, View activity, right-stick click toggles the map, Start pause / close map. Menus support controller and keyboard navigation.
 
 ## Presentation and accessibility
 
@@ -101,11 +117,38 @@ Tests exercise geometry and textures with a CPU canvas and Babylon NullEngine; f
 - Sound uses four persistent beds, at most twelve transient voices, rate-limited cues and a master limiter.
 - Replay ghosts use one merged mesh and bounded local storage; they have no collision or shadow cost.
 - Babylon WebGPU selection retains a WebGL fallback. Procedural art uses independent random streams so visual edits do not reshuffle gameplay.
-- Version-three profiles migrate existing progress, settings, motes and route times rather than resetting them.
+- Version-four profiles migrate existing progress, settings, motes and route times rather than resetting them.
 
 The performance target remains 60 fps at 1080p on a midrange desktop, with scalable settings for slower hardware. It is a target, not a measured result for this overhaul.
 
 ## Roadmap
+
+### Current focus: speedster playgrounds
+
+- [x] Punchier sprint, responsive turns, sustained-corner drift rewards and momentum-preserving roof crests.
+- [x] Same-step Focus steering, gait-synced audio and acceleration/braking poses.
+- [x] Three new courses, two opt-in emergencies and quick retries.
+- [x] Cleaner facades, tiled roofs and smaller beacons within existing geometry budgets.
+- [x] Version-four save migration preserving earlier records and ghosts.
+- [ ] Complete GPU/browser appearance, sustained frame-time and physical-controller playtests for this pass.
+
+### Previous playability pass
+
+This local playability pass addresses camera response, readable ability feedback and finding a reason to run. It builds on the GitHub roadmap below; the larger systems are still future work.
+
+- [x] Camera inherits player translation without sprint lag; shorter boom, restrained FOV/roll and correct look direction.
+- [x] Keyboard camera fallback (IJKL), V recenter and graceful pointer-capture failure.
+- [x] Ability cooldowns, energy requirements and feedback within the HUD; notifications moved out of the travel corridor.
+- [x] Filterable, distance-sorted map destinations with selection, direct bearing, beacon and arrival handling.
+- [x] Map building footprints and speed-adaptive minimap range.
+- [x] Free-roam momentum chains with traversal multipliers and energy rewards.
+- [x] Brighter street canyons, storefront glazing/signage, softer facade normals, brighter foliage and clearer road paint.
+- [ ] Playtest camera at top speed with mouse and controller on target hardware; tune framing and sensitivity from player feedback.
+- [x] Add three authored traversal playgrounds with rooftop links, stepped cargo shortcuts, medals and separate handling records.
+- [ ] Add road-aware route planning, zoom/pan and controller destination selection to the map. Current guidance is a direct bearing.
+- [ ] Improve character animation, street props and district silhouettes with authored assets and measured GPU budgets.
+
+See [playability pass and validation](docs/PLAYABILITY.md) for controls, limits and verification.
 
 ### Implemented
 
@@ -113,7 +156,7 @@ The performance target remains 60 fps at 1080p on a midrange desktop, with scala
 - [x] Expanded 5.55 km city, ten districts, fifteen landmarks and distant skyline LOD
 - [x] Nearby moving traffic and pedestrians with bounded instance pools
 - [x] Fifteen rewritten campaign chapters, playable choice branches and saved decisions
-- [x] Nine free-roam routes, six rescues, six duels and 112 collectibles
+- [x] Twelve free-roam routes, six rescues, six duels, two emergencies and 112 collectibles
 - [x] Local personal-best replay ghosts
 - [x] Procedural movement, ability and ambient audio, volume and mute
 - [x] Dodgeable committed attacks and a traversal-based Vantage phase

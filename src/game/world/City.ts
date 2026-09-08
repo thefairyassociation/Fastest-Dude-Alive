@@ -1,3 +1,4 @@
+import { buildPlaygroundArt } from "./Playgrounds";
 import { Mesh, MeshBuilder, Scene, Vector3, Vector4 } from "@babylonjs/core";
 import { clamp, mulberry32, pick, type Rng } from "../core/Rng";
 import type { Quality } from "../core/Save";
@@ -257,6 +258,12 @@ interface Chunk {
   mergedSilhouettes: Mesh[];
   mergedBulk: Mesh[];
   mergedDetail: Mesh[];
+  /** Structural / foliage meshes that should cast only while near the camera. */
+  casters: Mesh[];
+  fullVisible?: boolean;
+  horizonVisible?: boolean;
+  detailVisible?: boolean;
+  casting?: boolean;
 }
 
 export interface MoveResult {
@@ -290,10 +297,13 @@ export class City {
   private detailRadius: number;
   private readonly structureRadius: number;
   private readonly horizonRadius: number;
+  /** Keep shadow casters inside the cascade range plus a small pad. */
+  private readonly shadowRadius: number;
   private readonly expansionRng = mulberry32(0x4e574349);
   private readonly districtSignKeys = new Set<string>();
   private readonly boxBatches = new Map<string, { batch: StaticBoxBatch; x: number; z: number; material: string; detail: boolean }>();
   private readonly scratchNormal = new Vector3();
+  private readonly scratchResolve = { x: 0, z: 0 };
 
   constructor(
     readonly scene: Scene,
@@ -304,6 +314,7 @@ export class City {
     this.detailRadius = quality === "low" ? 260 : quality === "medium" ? 420 : 620;
     this.structureRadius = quality === "low" ? 850 : quality === "medium" ? 1150 : 1450;
     this.horizonRadius = quality === "low" ? 2300 : 3100;
+    this.shadowRadius = (quality === "low" ? 320 : 520) + 90;
     this.palette = new Palette(scene, this.rng, ROAD_HALF);
     this.sky = new Sky(scene, this.rng, quality, this.extent);
     this.build(quality);
@@ -398,6 +409,16 @@ export class City {
       }
     }
 
+    const feet = position.y;
+    const head = position.y + height;
+    if (this.grid.overlaps(position.x, position.z, radius, feet, head, stepHeight)) {
+      if (this.grid.depenetrate(position.x, position.z, radius, feet, head, stepHeight, this.scratchResolve)) {
+        position.x = clamp(this.scratchResolve.x, -this.extent + 4, this.extent - 4);
+        position.z = clamp(this.scratchResolve.z, -this.extent + 4, this.extent - 4);
+        out.hitWall = true;
+      }
+    }
+
     const requested = Math.abs(delta.x) + Math.abs(delta.z);
     out.progress = requested < 1e-4 ? 1 : Math.min(1, moved / requested);
     out.groundY = this.groundHeight(position.x, position.z, position.y + stepHeight);
@@ -458,24 +479,62 @@ export class City {
    * Resident city cells: full architecture nearby, one low-poly skyline mesh
    * per distant cell, and no render work beyond the horizon. Collision uses
    * its independent spatial hash and remains available during fast travel.
+   *
+   * `travel` is optional player velocity. Sprinting looks ahead so full
+   * geometry enables off-screen, and unloads sooner behind the camera.
    */
-  updateStreaming(focus: Vector3): void {
-    const radiusSq = this.detailRadius * this.detailRadius;
+  updateStreaming(focus: Vector3, travel?: Vector3): void {
+    const halfSpan = CHUNK_BLOCKS * BLOCK_PITCH * 0.5;
+    const speed = travel ? Math.hypot(travel.x, travel.z) : 0;
+    const looking = speed > 20;
+    const fx = looking && travel ? travel.x / speed : 0;
+    const fz = looking && travel ? travel.z / speed : 0;
+    const look = looking ? Math.min(speed * 1.15, 360) : 0;
+
     for (const chunk of this.chunks) {
       if (!chunk) continue;
       // Distance to the chunk bounds, not its centre: nearby props must not
       // disappear merely because the player is at a 750 m chunk corner.
-      const halfSpan = CHUNK_BLOCKS * BLOCK_PITCH * 0.5;
-      const dx = Math.max(0, Math.abs(chunk.centerX - focus.x) - halfSpan);
-      const dz = Math.max(0, Math.abs(chunk.centerZ - focus.z) - halfSpan);
-      const distanceSq = dx * dx + dz * dz;
-      const near = distanceSq < radiusSq;
-      const full = distanceSq < this.structureRadius * this.structureRadius;
-      const horizon = !full && distanceSq < this.horizonRadius * this.horizonRadius;
-      for (const mesh of chunk.mergedBulk) if (mesh.isEnabled() !== full) mesh.setEnabled(full);
-      for (const mesh of chunk.mergedSilhouettes) if (mesh.isEnabled() !== horizon) mesh.setEnabled(horizon);
-      for (const mesh of chunk.mergedDetail) {
-        if (mesh.isEnabled() !== near) mesh.setEnabled(near);
+      let distanceSq = boundsDistanceSq(chunk.centerX, chunk.centerZ, focus.x, focus.z, halfSpan);
+      if (looking) {
+        const ahead = (chunk.centerX - focus.x) * fx + (chunk.centerZ - focus.z) * fz;
+        if (ahead < -halfSpan) {
+          // Behind the runner: drop to skyline sooner so the GPU is not
+          // shading a 750 m slab the camera will never see.
+          distanceSq *= 2.25;
+        } else if (look > 0) {
+          distanceSq = Math.min(
+            distanceSq,
+            boundsDistanceSq(chunk.centerX, chunk.centerZ, focus.x + fx * look, focus.z + fz * look, halfSpan),
+          );
+        }
+      }
+
+      const near = distanceSq < (this.detailRadius + (chunk.detailVisible ? 70 : 0)) ** 2;
+      const full = distanceSq < (this.structureRadius + (chunk.fullVisible ? 120 : 0)) ** 2;
+      const horizon = !full && distanceSq < (this.horizonRadius + (chunk.horizonVisible ? 150 : 0)) ** 2;
+      const nowSq = boundsDistanceSq(chunk.centerX, chunk.centerZ, focus.x, focus.z, halfSpan);
+      const casting = nowSq < this.shadowRadius * this.shadowRadius;
+      // Most frames stay in the same LOD bands. Touch meshes only when a
+      // band changes; keep distance checks current even during fast travel.
+      if (chunk.fullVisible !== full) {
+        for (const mesh of chunk.mergedBulk) mesh.setEnabled(full);
+        chunk.fullVisible = full;
+      }
+      if (chunk.horizonVisible !== horizon) {
+        for (const mesh of chunk.mergedSilhouettes) mesh.setEnabled(horizon);
+        chunk.horizonVisible = horizon;
+      }
+      if (chunk.detailVisible !== near) {
+        for (const mesh of chunk.mergedDetail) mesh.setEnabled(near);
+        chunk.detailVisible = near;
+      }
+      if (chunk.casting !== casting) {
+        for (const mesh of chunk.casters) {
+          if (casting) this.sky.shadows.addShadowCaster(mesh, false);
+          else this.sky.shadows.removeShadowCaster(mesh, false);
+        }
+        chunk.casting = casting;
       }
     }
   }
@@ -531,6 +590,7 @@ export class City {
 
     buildRiverfront(this.buildContext(), this.extent, BRIDGE_ROWS);
     buildHorizon(this.buildContext(), this.extent);
+    buildPlaygroundArt(this.buildContext(), this);
     this.flushBoxes();
     this.mergeChunks();
     this.updateStreaming(this.start);
@@ -711,7 +771,7 @@ export class City {
     // Parapet lip: gives the roof an edge to mantle onto and reads at range.
     const parapet = MeshBuilder.CreateBox(
       `parapet-${gx}-${gz}-${x}-${z}`,
-      { width: width + 1.2, depth: depth + 1.2, height: 1.1, faceUV: plainUv() },
+      { width: width + 1.2, depth: depth + 1.2, height: 1.1, faceUV: Array.from({ length: 6 }, () => new Vector4(0, 0, width / 8, depth / 8)) },
       this.scene,
     );
     parapet.position.set(x, height + KERB_Y + 0.55, z);
@@ -728,7 +788,7 @@ export class City {
       );
       penthouse.position.set(
         x + (rng() - 0.5) * width * 0.3,
-        height + KERB_Y + boxH * 0.5,
+        height + KERB_Y + 1.1 + boxH * 0.5,
         z + (rng() - 0.5) * depth * 0.3,
       );
       this.addMesh("concrete", penthouse, false);
@@ -740,7 +800,7 @@ export class City {
         { height: 10 + rng() * 12, diameterTop: 0.18, diameterBottom: 0.5, tessellation: 6 },
         this.scene,
       );
-      mast.position.set(x, height + KERB_Y + 6, z);
+      mast.position.set(x, height + KERB_Y + 1.1 + mast.getBoundingInfo().boundingBox.extendSize.y, z);
       this.addMesh("steel", mast, true);
     }
 
@@ -758,32 +818,49 @@ export class City {
   /** Layered architecture inside the existing footprints and roof heights. */
   private dressTower(x: number, z: number, w: number, d: number, h: number, style: string): void {
     const glass = style === "glass-tower" || style === "panel-dark";
-    const art = this.artRng;
     const box = (key: string, dx: number, y: number, dz: number, width: number, height: number, depth: number, detail = false): void => {
       this.queueBox(key, x + dx, KERB_Y + y, z + dz, width, height, depth, detail);
     };
-    const trim = glass ? (art() < 0.45 ? "copper" : "steel-bright") : "warm-stone";
+    const trim = glass ? "steel" : "warm-stone";
     // Two facade languages: curtain-wall fins and masonry cornices. Slender
     // visual relief keeps the existing collision envelope and routes stable.
     if (glass) {
-      for (const offset of [-0.42, 0, 0.42]) {
+      for (const offset of [-0.42, 0.42]) {
         for (const side of [-1, 1]) {
           box(trim, offset * w, h / 2, side * d / 2, 0.48, h, 0.38);
           box(trim, side * w / 2, h / 2, offset * d, 0.38, h, 0.48);
         }
       }
-      const bandY = h * (0.6 + art() * 0.18);
+      const bandY = Math.floor(h / 3.6 * 0.66) * 3.6;
       box("steel", 0, bandY, 0, w + 0.3, 1.2, d + 0.3);
       box(style === "glass-tower" ? "cyan-light" : "warm-light", 0, h - 0.4, -d / 2 - 0.12, w * 0.92, 0.18, 0.1);
       // Contrasting opaque spandrels make the crown read as a designed tier.
-      for (const side of [-1, 1]) box(trim, side * (w / 2 - 1.4), h - 3, 0, 2.8, 6, d + 0.16);
+      box("steel", 0, h - 0.6, 0, w + 0.16, 1.2, d + 0.16);
     } else {
-      for (let y = 5; y < h; y += 12) box(trim, 0, y, 0, w + 0.4, 0.42, d + 0.4);
+      for (let y = 7.2; y < h; y += 21.6) box(trim, 0, y, 0, w + 0.4, 0.42, d + 0.4);
       for (const side of [-1, 1]) {
         box(trim, side * (w / 2 - 0.4), h / 2, -d / 2, 0.85, h, 0.4);
         box(trim, side * (w / 2 - 0.4), h / 2, d / 2, 0.85, h, 0.4);
       }
     }
+    const shop = style === "glass-tower" ? ["MERIDIAN TRANSIT", "NEXT STOP / EVERYWHERE", "#75d9cc"]
+      : style === "brick-mid" ? ["CORNER COFFEE", "OPEN EARLY / STAY LATE", "#edb47a"]
+      : style === "panel-dark" ? ["NORTHLINE RUNNING", "FIND YOUR PACE", "#a9e0ef"]
+      : ["MERIDIAN MARKET", "YOUR NEIGHBOURHOOD / EVERY DAY", "#e7c28b"];
+    const signKey = `shopfront:${style}`;
+    if (!this.districtSignKeys.has(signKey)) {
+      this.palette.emissiveTextured(signKey, createSignTexture(this.scene, signKey, shop[0]!, shop[1]!, shop[2]!), 0.85);
+      this.districtSignKeys.add(signKey);
+    }
+    // Two outward street faces per lot; shared sign textures supply the detail.
+    const streetX = Math.sign(x - Math.round(x / BLOCK_PITCH) * BLOCK_PITCH) || 1;
+    const streetZ = Math.sign(z - Math.round(z / BLOCK_PITCH) * BLOCK_PITCH) || 1;
+    box("car-glass", 0, 3.1, streetZ * (d / 2 + 0.12), w * 0.82, 4.4, 0.12, true);
+    box(signKey, 0, 6.2, streetZ * (d / 2 + 0.16), 16, 2.2, 0.16, true);
+    box("warm-light", 0, 5.35, streetZ * (d / 2 + 0.25), w * 0.82, 0.1, 0.12, true);
+    box("car-glass", streetX * (w / 2 + 0.12), 3.1, 0, 0.12, 4.4, d * 0.82, true);
+    box(signKey, streetX * (w / 2 + 0.16), 6.2, 0, 0.16, 2.2, 16, true);
+    box("warm-light", streetX * (w / 2 + 0.25), 5.35, 0, 0.12, 0.1, d * 0.82, true);
     // A distinct ground-floor plinth and door bays establish human scale.
     box(glass ? "steel" : "warm-stone", 0, 0.8, 0, w + 0.15, 1.6, d + 0.15);
     for (const side of [-1, 1]) {
@@ -1036,6 +1113,7 @@ export class City {
         detail: new Map(),
         mergedBulk: [],
         mergedDetail: [],
+        casters: [],
       };
       this.chunks[index] = chunk;
     }
@@ -1086,18 +1164,17 @@ export class City {
         const merged = this.mergeGroup(materialKey, meshes);
         if (merged) {
           chunk.mergedBulk.push(merged);
-          // The prototype only registered actors/landmarks. Without these
-          // casters, every avenue stayed uniformly lit under 200 m towers.
-          if (materialKey !== "grass" && materialKey !== "sidewalk") {
-            this.sky.shadows.addShadowCaster(merged, false);
-          }
+          // Registered during streaming, and only while the chunk is inside
+          // the cascade range. Distant full-detail cells still draw, but they
+          // must not fill the cascaded shadow maps.
+          if (materialKey !== "grass" && materialKey !== "sidewalk") chunk.casters.push(merged);
         }
       }
       for (const [materialKey, meshes] of chunk.detail) {
         const merged = this.mergeGroup(materialKey, meshes);
         if (merged) {
           chunk.mergedDetail.push(merged);
-          if (materialKey === "trunk" || materialKey.startsWith("leaf")) this.sky.shadows.addShadowCaster(merged, false);
+          if (materialKey === "trunk" || materialKey.startsWith("leaf")) chunk.casters.push(merged);
         }
       }
       const skyline = this.mergeGroup("skyline", chunk.silhouettes);
@@ -1110,7 +1187,12 @@ export class City {
 
   private mergeGroup(materialKey: string, meshes: Mesh[]): Mesh | null {
     if (meshes.length === 0) return null;
-    const merged = Mesh.MergeMeshes(meshes, true, true, undefined, false, false);
+    // A lone batched mesh already has per-block submeshes; merging it would
+    // collapse those bounds back into one 750 m AABB.
+    const merged =
+      meshes.length === 1
+        ? meshes[0]!
+        : Mesh.MergeMeshes(meshes, true, true, undefined, true, false);
     if (!merged) return null;
     merged.name = `${materialKey}-merged`;
     merged.material = this.palette.get(materialKey);
@@ -1125,6 +1207,12 @@ export class City {
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
+
+function boundsDistanceSq(centerX: number, centerZ: number, x: number, z: number, halfSpan: number): number {
+  const dx = Math.max(0, Math.abs(centerX - x) - halfSpan);
+  const dz = Math.max(0, Math.abs(centerZ - z) - halfSpan);
+  return dx * dx + dz * dz;
+}
 
 /** Per-face UV repeats so windows keep real-world scale on any box size. */
 function facadeUv(width: number, depth: number, height: number): Vector4[] {
