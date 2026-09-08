@@ -297,6 +297,7 @@ export class City {
   private readonly districtSignKeys = new Set<string>();
   private readonly boxBatches = new Map<string, { batch: StaticBoxBatch; x: number; z: number; material: string; detail: boolean }>();
   private readonly scratchNormal = new Vector3();
+  private readonly scratchResolve = { x: 0, z: 0 };
 
   constructor(
     readonly scene: Scene,
@@ -398,6 +399,16 @@ export class City {
         out.hitWall = true;
         out.wallX = 0;
         out.wallZ = stepZ > 0 ? -1 : 1;
+      }
+    }
+
+    const feet = position.y;
+    const head = position.y + height;
+    if (this.grid.overlaps(position.x, position.z, radius, feet, head, stepHeight)) {
+      if (this.grid.depenetrate(position.x, position.z, radius, feet, head, stepHeight, this.scratchResolve)) {
+        position.x = clamp(this.scratchResolve.x, -this.extent + 4, this.extent - 4);
+        position.z = clamp(this.scratchResolve.z, -this.extent + 4, this.extent - 4);
+        out.hitWall = true;
       }
     }
 
@@ -796,6 +807,24 @@ export class City {
         box(trim, side * (w / 2 - 0.4), h / 2, d / 2, 0.85, h, 0.4);
       }
     }
+    const shop = style === "glass-tower" ? ["MERIDIAN TRANSIT", "NEXT STOP / EVERYWHERE", "#75d9cc"]
+      : style === "brick-mid" ? ["CORNER COFFEE", "OPEN EARLY / STAY LATE", "#edb47a"]
+      : style === "panel-dark" ? ["NORTHLINE RUNNING", "FIND YOUR PACE", "#a9e0ef"]
+      : ["MERIDIAN MARKET", "YOUR NEIGHBOURHOOD / EVERY DAY", "#e7c28b"];
+    const signKey = `shopfront:${style}`;
+    if (!this.districtSignKeys.has(signKey)) {
+      this.palette.emissiveTextured(signKey, createSignTexture(this.scene, signKey, shop[0]!, shop[1]!, shop[2]!), 0.85);
+      this.districtSignKeys.add(signKey);
+    }
+    // Two outward street faces per lot; shared sign textures supply the detail.
+    const streetX = Math.sign(x - Math.round(x / BLOCK_PITCH) * BLOCK_PITCH) || 1;
+    const streetZ = Math.sign(z - Math.round(z / BLOCK_PITCH) * BLOCK_PITCH) || 1;
+    box("car-glass", 0, 3.1, streetZ * (d / 2 + 0.12), w * 0.82, 4.4, 0.12, true);
+    box(signKey, 0, 6.2, streetZ * (d / 2 + 0.16), 16, 2.2, 0.16, true);
+    box("warm-light", 0, 5.35, streetZ * (d / 2 + 0.25), w * 0.82, 0.1, 0.12, true);
+    box("car-glass", streetX * (w / 2 + 0.12), 3.1, 0, 0.12, 4.4, d * 0.82, true);
+    box(signKey, streetX * (w / 2 + 0.16), 6.2, 0, 0.16, 2.2, 16, true);
+    box("warm-light", streetX * (w / 2 + 0.25), 5.35, 0, 0.12, 0.1, d * 0.82, true);
     // A distinct ground-floor plinth and door bays establish human scale.
     box(glass ? "steel" : "warm-stone", 0, 0.8, 0, w + 0.15, 1.6, d + 0.15);
     for (const side of [-1, 1]) {

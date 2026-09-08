@@ -11,6 +11,12 @@ let stored = null;
 globalThis.localStorage = { getItem: () => stored, setItem: (_, value) => { stored = value; } };
 const replay = { duration: 2, frames: [[0, 0, 0, 0, 3.1], [1, 10, 4, 20, -3.1], [2, 20, 0, 40, -3]] };
 
+test('new profiles default to medium quality; existing high settings are kept', () => {
+  stored = null;
+  assert.equal(new Save().settings.quality, 'medium');
+  assert.equal(migrate({ settings: { quality: 'high' } }).settings.quality, 'high');
+});
+
 test('v2 progress, route bests and collectible IDs survive migration; old finale unlocks rebuilding', () => {
   const p = migrate({ version: 2, settings: { quality: 'low', lookSensitivity: 2 }, campaign: { unlocked: 12, completed: ['ch12-fastest-dude-alive'] }, routeBests: { 'meridian-loop': 48.2 }, collected: ['mote-12'], topSpeedKph: 730 });
   assert.equal(p.version, 3);

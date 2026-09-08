@@ -114,6 +114,58 @@ export class CollisionGrid {
   }
 
   /**
+   * Pushes a body that has clipped into a solid back onto the nearest face.
+   * Sequential X/Z sweeps can corner-cut at sprint speed; without this the
+   * next frame still overlaps on both axes and the runner cannot walk out.
+   * Returns true when a correction was applied.
+   */
+  depenetrate(
+    x: number,
+    z: number,
+    radius: number,
+    feet: number,
+    head: number,
+    step: number,
+    out: { x: number; z: number },
+  ): boolean {
+    let px = x;
+    let pz = z;
+    let pushed = false;
+    for (let pass = 0; pass < 4; pass += 1) {
+      let best = Number.POSITIVE_INFINITY;
+      let nx = 0;
+      let nz = 0;
+      this.query(px - radius, pz - radius, px + radius, pz + radius, (solid) => {
+        if (solid.top <= feet + step || solid.bottom >= head) return;
+        if (
+          px + radius <= solid.minX ||
+          px - radius >= solid.maxX ||
+          pz + radius <= solid.minZ ||
+          pz - radius >= solid.maxZ
+        ) {
+          return;
+        }
+        const dxMin = px + radius - solid.minX;
+        const dxMax = solid.maxX - (px - radius);
+        const dzMin = pz + radius - solid.minZ;
+        const dzMax = solid.maxZ - (pz - radius);
+        if (dxMin > 0 && dxMin < best) { best = dxMin; nx = -1; nz = 0; }
+        if (dxMax > 0 && dxMax < best) { best = dxMax; nx = 1; nz = 0; }
+        if (dzMin > 0 && dzMin < best) { best = dzMin; nx = 0; nz = -1; }
+        if (dzMax > 0 && dzMax < best) { best = dzMax; nx = 0; nz = 1; }
+      });
+      if (!Number.isFinite(best) || best === Number.POSITIVE_INFINITY) break;
+      const distance = best + 0.02;
+      px += nx * distance;
+      pz += nz * distance;
+      pushed = true;
+    }
+    out.x = px;
+    out.z = pz;
+    return pushed;
+  }
+
+  /**
    * Finds the nearest climbable face within `reach` of the body, and returns
    * its outward normal. Used to latch onto walls for wall-running.
    */

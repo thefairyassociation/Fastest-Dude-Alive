@@ -240,3 +240,45 @@ test('full map covers the expanded world, distinguishes activities, caches terra
   assert.equal(closeCalls, 1);
   assert.equal(hud.isMapOpen, false);
 });
+
+test('map selection filters destinations, retains keyboard focus and clears guidance', () => {
+  const dom = setupDOM();
+  const city = { extent: 2775, landmarks: [{ name: 'Station', position: new Vector3(700, 0, 0) }], districtNameAt: () => 'Midtown', isWater: () => false };
+  const hud = new Hud(city);
+  const player = { position: Vector3.Zero(), root: { rotation: { y: 0 } }, speedKph: 0, speed: 0, topSpeed: 215, health: 100, charge: 50, combo: 1, state: 'ground', dashCooldown: 0, boltCooldown: 0, pulseCooldown: 0, speedRatio: 0 };
+  const state = { modeLabel: 'Free roam', objective: { title: 'Explore', detail: '' }, focusActive: false, markers: [], rogue: null, prompt: null, motesFound: 0, motesTotal: 112, showMph: false, dialogueActive: false,
+    activitySites: [{ name: 'Far race', position: new Vector3(500, 0, 0), kind: 'route' }, { name: 'Rescue', position: new Vector3(100, 0, 0), kind: 'rescue' }, { name: 'Near race', position: new Vector3(200, 0, 0), kind: 'route' }] };
+  hud.update(.016, player, state);
+  hud.toggleMap();
+  const list = dom.elements.get('map-destinations');
+  assert.equal(list.children[0].dataset.destination, 'Rescue');
+  const filter = dom.elements.get('map-filter'); filter.value = 'route'; filter.dispatchEvent(new Event('change'));
+  assert.deepEqual(list.children.map(b => b.dataset.destination), ['Near race', 'Far race']);
+  list.children[1].focus(); list.children[1].click();
+  assert.equal(hud.destination.name, 'Far race');
+  assert.equal(document.activeElement.dataset.destination, 'Far race');
+  assert.equal(document.activeElement.attrs.get('aria-pressed'), 'true');
+  assert.match(dom.elements.get('map-selection').textContent, /Far race/);
+  hud.closeMap(); hud.update(.016, player, state);
+  assert.equal(dom.elements.get('navigation').classList.contains('is-hidden'), false);
+  assert.match(dom.elements.get('navigation-distance').textContent, /500 m/);
+  hud.toggleMap(); dom.elements.get('map-clear').click();
+  assert.equal(hud.destination, null);
+  hud.closeMap(); hud.update(.016, player, state);
+  assert.equal(dom.elements.get('navigation').classList.contains('is-hidden'), true);
+});
+
+test('ability messages remain in their slot, expire, and reveal cooldown and energy requirements', () => {
+  const dom = setupDOM();
+  const hud = new Hud({ extent: 2775, landmarks: [], districtNameAt: () => 'Midtown', isWater: () => false });
+  const player = { position: Vector3.Zero(), root: { rotation: { y: 0 } }, speedKph: 0, speed: 0, topSpeed: 215, health: 100, charge: 15, combo: 1, state: 'ground', dashCooldown: 0, boltCooldown: 0, pulseCooldown: 2, speedRatio: 0 };
+  const state = { modeLabel: 'Free roam', objective: { title: 'Explore', detail: '' }, focusActive: false, markers: [], rogue: null, prompt: null, motesFound: 0, motesTotal: 112, showMph: false, dialogueActive: false };
+  hud.abilityFeedback('ability-bolt', 'No target'); hud.update(.016, player, state);
+  assert.equal(dom.elements.get('ability-bolt-status').textContent, 'No target');
+  assert.equal(dom.elements.get('toast').classList.contains('active'), false);
+  assert.equal(dom.elements.get('ability-pulse-status').textContent, '2.0s');
+  hud.update(1, player, state);
+  assert.equal(dom.elements.get('ability-bolt-status').textContent, 'Ready');
+  player.pulseCooldown = 0; hud.update(.016, player, state);
+  assert.equal(dom.elements.get('ability-pulse-status').textContent, '35 energy');
+});

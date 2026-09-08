@@ -23,7 +23,8 @@ export type Action =
   | "recover"
   | "advance"
   | "pause"
-  | "map";
+  | "map"
+  | "recenter";
 
 const DEFAULT_BINDINGS: Record<Action, string[]> = {
   forward: ["KeyW", "ArrowUp"],
@@ -43,10 +44,12 @@ const DEFAULT_BINDINGS: Record<Action, string[]> = {
   advance: ["Space", "Enter", "Mouse0"],
   pause: ["Escape"],
   map: ["KeyM"],
+  recenter: ["KeyV"],
 };
 
 /** Codes we swallow so the page never scrolls or scrubs under the game. */
 const BLOCKED = new Set([
+  "KeyI", "KeyJ", "KeyK", "KeyL", "KeyV",
   "KeyW", "KeyA", "KeyS", "KeyD", "KeyE", "KeyF", "KeyQ", "KeyR", "KeyT", "KeyC", "KeyM",
   "ShiftLeft", "ShiftRight", "ControlLeft", "Space",
   "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
@@ -132,7 +135,8 @@ export class Input {
 
   requestPointerLock(): void {
     if (document.pointerLockElement !== this.canvas) {
-      void this.canvas.requestPointerLock();
+      // Some embedded browsers deny capture. Keyboard camera controls remain available.
+      try { void this.canvas.requestPointerLock()?.catch(() => {}); } catch { /* unsupported capture */ }
     }
   }
 
@@ -269,6 +273,11 @@ export class Input {
   }
 
   takeLook(dt = 1 / 60): { x: number; y: number } {
+    if (this.enabled) {
+      const seconds = Math.min(0.05, Math.max(0, dt));
+      this.lookX += (Number(this.held.has("KeyL")) - Number(this.held.has("KeyJ"))) * 900 * seconds;
+      this.lookY += (Number(this.held.has("KeyK")) - Number(this.held.has("KeyI"))) * 700 * seconds;
+    }
     const pad = this.gamepad();
     if (pad) {
       const frameScale = Math.min(0.05, Math.max(0, dt)) * 60;

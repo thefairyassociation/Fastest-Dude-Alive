@@ -27,6 +27,10 @@ The whole city is open immediately, independently of campaign progress.
 - **Six opt-in duels**, including Vantage at Beacon Point. Combat begins only when you start an encounter.
 - Moving traffic and walking citizens populate the streets around you, independently of rescue actors. They are ambient scenery rather than collision obstacles.
 
+Press **M** to inspect the full city, filter time trials/rescues/duels/landmarks, and select a destination from the distance-sorted list or its map marker. A compass bearing, distance and world beacon guide you there. The bearing is direct, so choose your own streets or rooftops. Clear the destination in the map; arriving within 28 m clears it automatically.
+
+Free roam also has **Momentum runs**: travel above 40 m/s to earn flow from distance, chain different traversal styles for up to ×4, and earn 12 energy every 600 points. Slowing down gives you 2.5 seconds to recover before banking the chain. Your session best remains visible; this bonus is disabled in activities and the campaign. Recovery cancels a chain.
+
 Press **M** to inspect the full city and activity markers. Opening the map pauses the world and releases the mouse; close it with M, Escape, the controller map/pause buttons or its close button. Approach an activity and press **T** to start; T again abandons it.
 
 ## Minutes Owed
@@ -55,7 +59,8 @@ Momentum, heavy steering at speed, wall running, vertical running, water running
 | Shift | Sprint toward approximately 215 m/s / 775 km/h |
 | Space | Jump; in the air, phase dash; on a wall, kick away |
 | Ctrl / C | Slide while moving; release before starting another slide |
-| Mouse / right stick | Look |
+| Mouse / right stick / IJKL | Look (IJKL works without mouse capture) |
+| V | Recenter camera behind the runner |
 | Left click | Speed strike |
 | E | Arc bolt |
 | Q | Kinetic pulse |
@@ -106,6 +111,24 @@ Tests exercise geometry and textures with a CPU canvas and Babylon NullEngine; f
 The performance target remains 60 fps at 1080p on a midrange desktop, with scalable settings for slower hardware. It is a target, not a measured result for this overhaul.
 
 ## Roadmap
+
+### Current focus: make the minute-to-minute game better
+
+This local playability pass addresses camera response, readable ability feedback and finding a reason to run. It builds on the GitHub roadmap below; the larger systems are still future work.
+
+- [x] Camera inherits player translation without sprint lag; shorter boom, restrained FOV/roll and correct look direction.
+- [x] Keyboard camera fallback (IJKL), V recenter and graceful pointer-capture failure.
+- [x] Ability cooldowns, energy requirements and feedback within the HUD; notifications moved out of the travel corridor.
+- [x] Filterable, distance-sorted map destinations with selection, direct bearing, beacon and arrival handling.
+- [x] Map building footprints and speed-adaptive minimap range.
+- [x] Free-roam momentum chains with traversal multipliers and energy rewards.
+- [x] Brighter street canyons, storefront glazing/signage, softer facade normals, brighter foliage and clearer road paint.
+- [ ] Playtest camera at top speed with mouse and controller on target hardware; tune framing and sensitivity from player feedback.
+- [ ] Add authored short traversal playgrounds with ramps, rooftop links and optional shortcuts; preserve old route records.
+- [ ] Add road-aware route planning, zoom/pan and controller destination selection to the map. Current guidance is a direct bearing.
+- [ ] Improve character animation, street props and district silhouettes with authored assets and measured GPU budgets.
+
+See [playability pass and validation](docs/PLAYABILITY.md) for controls, limits and verification.
 
 ### Implemented
 
