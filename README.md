@@ -30,7 +30,7 @@ The whole city is open immediately, independently of campaign progress.
 - **37 × 37 blocks**, up from 25 × 25: 2.19 times the previous square map area. The original inner-city tower footprints, roof heights and landmark approaches are retained.
 - **Ten districts:** the Crest, Halcyon Row, Old Meridian, Kestrel Docks, Marrow Hill and Midtown, plus Northline, Westhaven, the Foundry Belt and Saltmere.
 - **Fifteen landmarks**, including a northern observatory and railway station, Westhaven reservoir, a foundry exchange, the Saltmere freight terminal and Beacon Point.
-- **Nine time trials:** Meridian Loop, Riverline Sprint, Crest Ladder, Kestrel Courier, Northline Express, Westhaven Circuit, Foundry Night Shift, Saltmere Coast and Five Bridges. The four original course geometries keep existing personal bests comparable.
+- **Twelve time trials:** Crest Circuit, River Rush and Foundry Flow join Meridian Loop, Riverline Sprint, Crest Ladder, Kestrel Courier, Northline Express, Westhaven Circuit, Foundry Night Shift, Saltmere Coast and Five Bridges. Earlier course geometries remain intact; the new handling uses separate records.
 - **Personal-best ghosts:** a cyan pace runner follows your fastest recorded run. Recordings stay in your browser, at five samples per second, up to four minutes and eight courses. Times remain saved when older ghosts are evicted. Recovery-assisted runs finish as practice and do not overwrite a best.
 - **Six rescues:** Warehouse Collapse, Container Stack Failure, Last Train Out, Reservoir Evacuation, Shift Change and The Stranded Ferry.
 - **112 resonance motes.** The original 64 IDs and placement distribution are retained; another 48 populate the outer boroughs.
@@ -61,7 +61,7 @@ The authored script, cast and campaign runner live in `src/game/story/`. See [st
 
 ## Movement and combat
 
-Responsive momentum steering, wall running, vertical running, water running, slide, air dash and focus remain the foundation.
+Responsive momentum steering, wall running, vertical running, water running, drift, air dash and focus remain the foundation.
 
 | Input | Action |
 | --- | --- |
@@ -81,7 +81,7 @@ Responsive momentum steering, wall running, vertical running, water running, sli
 | M | Pause and inspect the city map |
 | Escape | Pause / resume |
 
-Jump buffering and a short coyote window make landing transitions more forgiving. Opposite steering now brakes into a turn instead of getting stuck on an exactly reversed heading. Holding slide no longer repeatedly grants its entry boost. Gamepad camera rotation uses elapsed time rather than frame count.
+Jump buffering and a short coyote window make landing transitions more forgiving. Opposite steering now brakes into a turn instead of getting stuck on an exactly reversed heading. Drift rewards require a sustained corner and a collision-free release; entry alone grants no boost. Gamepad camera rotation uses elapsed time rather than frame count.
 
 Attacks commit to the position shown by their warning, allowing a dodge. Charges follow a committed lane; Vantage alternates charges with jumpable expanding ground sweeps at low health. The HUD gives the current counterplay cue. Speed strikes and body checks retain their recovery windows.
 
@@ -156,7 +156,7 @@ See [playability pass and validation](docs/PLAYABILITY.md) for controls, limits 
 - [x] Expanded 5.55 km city, ten districts, fifteen landmarks and distant skyline LOD
 - [x] Nearby moving traffic and pedestrians with bounded instance pools
 - [x] Fifteen rewritten campaign chapters, playable choice branches and saved decisions
-- [x] Nine free-roam routes, six rescues, six duels and 112 collectibles
+- [x] Twelve free-roam routes, six rescues, six duels, two emergencies and 112 collectibles
 - [x] Local personal-best replay ghosts
 - [x] Procedural movement, ability and ambient audio, volume and mute
 - [x] Dodgeable committed attacks and a traversal-based Vantage phase

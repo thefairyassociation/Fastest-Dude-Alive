@@ -8,7 +8,7 @@ Accelerate, carve a corner, climb to the roofs, cross the water and answer a cal
 
 - Run/sprint acceleration: 95/130 m/s². Sprint reaches 193.5 m/s (90% of 215) in 1.49 s; absolute cap remains 280 m/s.
 - Steering authority falls gently from 13 to 9 with speed. Focus multiplies it by 1.7 and is resolved before movement. Air authority rises to 0.7. Opposite input brakes at 260 m/s².
-- Ctrl/C (controller B) holds a drift with 18 m/s² drag. Releasing after 0.35–2.5 seconds, at least 0.55 radians of cornering, and at least 45 m/s earns 22 m/s and six energy. Entry, taps, straight slides and holding until expiry earn nothing.
+- Ctrl/C (controller B) holds a drift with 18 m/s² drag. Releasing after 0.35–2.5 seconds, at least 0.55 radians of cornering, at least 45 m/s and no wall collision earns 22 m/s and six energy. Entry, taps, straight slides and holding until expiry earn nothing.
 - Roof exits retain 85% of wall-entry speed, at least 45 m/s, and sweep over the lip. Wall running tolerates 0.1-second facade seams. Collision-step wall attachment preserves the approach speed.
 - Running audio follows the rig's half-stride count; sliding does not produce footsteps. Acceleration, braking and drifting change body lean. Manual look immediately removes the bounded travel anticipation; reduced motion disables it.
 
@@ -40,7 +40,7 @@ The PR also carries the preceding local camera/map/momentum commits and existing
 
 ## Validation
 
-- Baseline: 61 passing tests. The test command runs files sequentially to avoid overlapping memory-heavy NullEngine city builds. Final counts and CI results are reported in the PR.
+- Baseline: 61 passing tests. The test command runs files sequentially to avoid overlapping memory-heavy NullEngine city builds. Final local suite: 71 tests passed. CI results are reported in the PR.
 - High city, before → after: 2,041 → 1,971 meshes; 3,811,774 → 3,684,274 vertices; 32,034 → 32,041 static colliders. Existing ceilings remain unchanged.
 - An eight-second sprint through actual city collision was simulated at both 120 Hz and 20 Hz, checking finite positions and no building overlaps throughout. Isolated run cost: 28 / 2 ms CPU respectively. This is simulation cost, not GPU frame time.
 - New tests cover acceleration, steering/Focus, drift farming, collision-swept roof exits, facade seams, courier route/telegraph/recovery, rescue clocks and Focus hazards, pool cleanup, retries, destination ownership, migration, medals and archived ghosts.
