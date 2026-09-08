@@ -24,6 +24,7 @@ export class RogueDuel implements Activity {
   private started = false;
   private elapsed = 0;
   private introShown = false;
+  private tactic = "Read the warning, then strike during recovery.";
   /** Latched the first time health crosses the threshold, not per frame. */
   private wasHurtBadly = false;
 
@@ -64,6 +65,7 @@ export class RogueDuel implements Activity {
 
     const rogues = world.activeRogues();
     const rogue = rogues[0];
+    if (rogue) this.tactic = rogue.tacticHint;
     if (!rogue || !rogue.alive) {
       world.save.update((profile) => {
         if (!profile.roguesBeaten.includes(this.definition.id)) {
@@ -87,7 +89,7 @@ export class RogueDuel implements Activity {
   status(): ActivityStatus {
     return {
       title: this.name,
-      detail: `${this.definition.name} · hit them during the recovery window`,
+      detail: `${this.definition.name} · ${this.tactic}`,
       progress: undefined,
     };
   }

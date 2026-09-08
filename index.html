@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0e1012" />
+    <meta name="theme-color" content="#080f16" />
     <meta
       name="description"
       content="Fastest Dude Alive — an original browser-based super-speed sandbox with a free-roam city and a full story campaign."
@@ -16,54 +16,56 @@
   </head>
   <body>
     <main id="game-shell">
-      <canvas id="game-canvas" aria-label="Fastest Dude Alive game view"></canvas>
+      <canvas id="game-canvas" aria-label="Fastest Dude Alive game view" tabindex="-1"></canvas>
       <div class="speed-vignette" aria-hidden="true"></div>
       <div class="focus-tint" aria-hidden="true"></div>
 
       <!-- ---------------- Loading ---------------- -->
       <section id="loading" class="loading-screen" aria-live="polite">
-        <div class="brand-bolt">FDA</div>
-        <p class="eyebrow">Every second is yours</p>
+        <div class="brand-bolt" aria-hidden="true"></div>
+        <p class="eyebrow">The city is still moving</p>
         <h1>Fastest Dude Alive</h1>
         <div class="loading-track"><span></span></div>
-        <p id="loading-status">Building Meridian City…</p>
+        <p id="loading-status">Finding a way through Meridian…</p>
       </section>
 
       <!-- ---------------- Main menu ---------------- -->
       <section id="menu" class="menu is-hidden" aria-label="Main menu">
         <div class="menu-inner">
+          <div class="menu-topline"><span class="city-signal" aria-hidden="true"></span><span>Meridian City</span><span class="topline-divider">/</span><span>A speedster story</span></div>
           <header class="menu-head">
-            <div class="brand-bolt small">FDA</div>
+            <div class="brand-bolt small" aria-hidden="true"></div>
             <div>
-              <p class="eyebrow">Meridian City / A speedster story</p>
+              <p class="eyebrow">Minutes Owed</p>
               <h1>Fastest<br>Dude <em>Alive.</em></h1>
+              <p class="menu-tagline">You can outrun anything.<br>Except a city that needs you.</p>
             </div>
           </header>
           <div class="hero-caption" aria-hidden="true">
             <span class="hero-caption-rule"></span>
-            <span>Halcyon / Resonance suit</span>
+            <span>On the clock / Meridian City</span>
             <strong>Nolan Reyes</strong>
-            <small>One city. No speed limit.</small>
+            <small>Every route has a cost.</small>
           </div>
 
           <div id="menu-root" class="menu-panel">
             <div class="mode-grid">
               <button class="mode-card" id="btn-free-roam" type="button">
-                <span class="mode-tag">01 / The city is yours</span>
+                <span class="mode-tag">01 <span class="mode-tag-rule"></span> Make your own way</span>
                 <strong>Free Roam</strong>
                 <p>
-                  Chase the skyline. Run the river. Find your limit in 3.7 km of open city.
+                  Run the rooftops. Cross the river. Answer the calls no one else can reach.
                 </p>
-                <span class="mode-go">Enter the city →</span>
+                <span class="mode-go" aria-hidden="true">↗</span>
               </button>
 
               <button class="mode-card" id="btn-story" type="button">
-                <span class="mode-tag">02 / Twelve chapters. One origin.</span>
-                <strong>Story Mode</strong>
+                <span class="mode-tag">02 <span class="mode-tag-rule"></span> <span id="campaign-chapter-count">The campaign</span></span>
+                <strong>Minutes Owed</strong>
                 <p>
-                  Eleven seconds changed Meridian. Eleven months later, you wake up.
+                  Every route has a cost. Find out who Meridian leaves waiting.
                 </p>
-                <span class="mode-go">Begin the campaign →</span>
+                <span class="mode-go" aria-hidden="true">↗</span>
               </button>
             </div>
 
@@ -77,10 +79,11 @@
           <!-- Chapter select -->
           <div id="menu-chapters" class="menu-panel is-hidden">
             <div class="panel-head">
-              <h2>Story Mode</h2>
+              <div><p class="eyebrow">The campaign</p><h2>Minutes Owed</h2></div>
               <button class="link-button" data-back="menu-root" type="button">← Back</button>
             </div>
-            <div id="chapter-list" class="chapter-list"></div>
+            <p class="panel-intro">A city on borrowed time. Your choices decide who gets it back.</p>
+            <div id="chapter-list" class="chapter-list" aria-label="Campaign chapters"></div>
           </div>
 
           <!-- Settings -->
@@ -97,7 +100,7 @@
                   <option value="medium">Medium</option>
                   <option value="low">Low</option>
                 </select>
-                <small>Applies on the next reload. Lower settings cut shadow resolution, clutter distance and trail/particle counts; Low also disables bloom.</small>
+                <small>Restart the game to apply. Choose a lower quality for a smoother run.</small>
               </label>
 
               <label class="setting">
@@ -108,7 +111,7 @@
 
               <label class="setting setting-row">
                 <input id="set-reduced-motion" type="checkbox" />
-                <span>Reduced motion — removes trails, camera roll, speed zoom, storm flashes and screen shake</span>
+                <span>Reduced motion — steady camera, softer effects, no flashes</span>
               </label>
 
               <label class="setting setting-row">
@@ -116,8 +119,17 @@
                 <span>Show speed in mph</span>
               </label>
 
+              <label class="setting">
+                <span>Sound volume</span>
+                <input id="setting-volume" type="range" min="0" max="1" step="0.05" aria-describedby="setting-volume-value" />
+                <small id="setting-volume-value">65%</small>
+              </label>
+              <label class="setting setting-row">
+                <input id="setting-muted" type="checkbox" />
+                <span>Mute sound</span>
+              </label>
               <button class="danger-button" id="btn-reset-profile" type="button">
-                Reset profile (times, motes, campaign progress)
+                Reset saved progress
               </button>
             </div>
           </div>
@@ -146,7 +158,7 @@
                 <tr><th>Esc</th><td>Pause</td></tr>
               </tbody>
             </table>
-            <p class="fine-print">A gamepad works too: sticks to move and look, A to jump, B to slide, X to strike, Y for bolt, bumpers for focus and pulse.</p>
+            <div class="gamepad-guide"><p class="eyebrow">Controller</p><p>Sticks to move and look · click left stick to sprint · A to jump / dash · B to slide · X to strike · Y for bolt · LB for focus · RB for pulse · View to start an activity · click right stick for the map · Menu to pause.</p><p class="fine-print">In menus: D-pad or left stick to move, A to select, B to go back. Keyboard: Tab or arrow keys to move, Enter to select.</p></div>
           </div>
         </div>
       </section>
@@ -155,10 +167,12 @@
       <section id="hud" class="hud is-hidden" aria-label="Game status">
         <div class="wordmark">
           <strong id="mode-label">Free roam</strong>
-          <span id="renderer-badge">Detecting GPU</span>
+          <span id="renderer-badge" hidden aria-hidden="true"></span>
+          <span class="hud-city-label">Meridian City</span>
         </div>
 
         <div class="objective-pill">
+          <span class="objective-kicker">Current route</span>
           <strong id="objective-title">Free roam</strong>
           <span id="objective-detail">Press T at a marker to start an activity.</span>
           <div class="objective-progress"><span id="objective-progress-fill"></span></div>
@@ -168,18 +182,19 @@
 
         <div class="minimap-wrap">
           <canvas id="minimap" width="360" height="360" aria-label="Local minimap"></canvas>
-          <div class="minimap-legend"><span id="mote-count">0 / 64</span> motes</div>
+          <div class="minimap-location" id="minimap-location">Meridian</div>
+          <div class="minimap-legend"><span><span id="mote-count">0 / 0</span> motes</span><span><kbd>M</kbd> Map</span></div>
         </div>
 
         <div class="cluster">
           <div id="combo" class="combo">×1 chain</div>
           <div class="bar-row">
-            <span class="bar-label">Vit</span>
+            <span class="bar-label">Health</span>
             <div class="meter"><span id="health-fill" class="health-fill"></span></div>
             <span id="health-label" class="bar-value">100</span>
           </div>
           <div class="bar-row">
-            <span class="bar-label">Mom</span>
+            <span class="bar-label">Charge</span>
             <div class="meter"><span id="charge-fill" class="charge-fill"></span></div>
             <span id="charge-label" class="bar-value">50</span>
           </div>
@@ -220,7 +235,7 @@
         </div>
 
         <!-- Dialogue -->
-        <div id="dialogue" class="dialogue is-hidden">
+        <div id="dialogue" class="dialogue is-hidden" role="region" aria-label="Conversation">
           <div class="dialogue-body">
             <div class="dialogue-speaker">
               <span id="dialogue-chip" class="speaker-chip">N</span>
@@ -229,21 +244,26 @@
                 <small id="dialogue-role"></small>
               </div>
             </div>
-            <p id="dialogue-text"></p>
+            <p id="dialogue-text" aria-live="polite" aria-atomic="true"></p>
             <div id="dialogue-choices" class="dialogue-choices is-hidden"></div>
-            <span id="dialogue-hint" class="dialogue-hint">Space to continue</span>
+            <div class="dialogue-footer"><span id="dialogue-count" class="dialogue-count"></span><button id="dialogue-advance" class="dialogue-hint" type="button"><span id="dialogue-hint">Space to continue</span> <span aria-hidden="true">→</span></button></div>
           </div>
         </div>
 
         <!-- Full map -->
-        <div id="map-overlay" class="map-overlay is-hidden">
-          <canvas id="citymap" width="900" height="900" aria-label="City map"></canvas>
-          <p class="map-hint">M to close</p>
+        <div id="map-overlay" class="map-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="map-title">
+          <div class="map-panel">
+            <div class="map-header"><div><p class="eyebrow">Find your next route</p><h2 id="map-title">Meridian City</h2></div><button id="map-close" class="link-button" type="button">Close map <kbd>M</kbd></button></div>
+            <div class="map-layout">
+              <div class="map-canvas-wrap"><canvas id="citymap" width="1100" height="1100" aria-label="North-up map of Meridian showing districts, landmarks, objectives and your location" aria-describedby="map-status"></canvas><span class="map-north" aria-hidden="true">↑ N</span></div>
+              <aside class="map-sidebar"><p class="eyebrow">You are here</p><h3 id="map-district">Meridian</h3><p id="map-status" class="map-status">Explore the city.</p><div class="map-legend"><span><i class="legend-player" aria-hidden="true"></i>Your location</span><span><i class="legend-route" aria-hidden="true"></i>Objective / checkpoint</span><span><i class="legend-rescue" aria-hidden="true"></i>Rescue</span><span><i class="legend-mote" aria-hidden="true"></i>Resonance mote</span><span><i class="legend-threat" aria-hidden="true"></i>Threat</span><span><i class="legend-activity" aria-hidden="true"></i>Optional activity</span><span><i class="legend-landmark" aria-hidden="true"></i>Landmark</span></div><p class="map-hint">Your minimap points toward objectives beyond its edge.</p><p class="map-hint">Run into walls to climb. Build speed to cross the water.</p><div class="map-scale"><span>City span</span><small id="map-scale-label"></small></div></aside>
+            </div>
+          </div>
         </div>
       </section>
 
       <!-- ---------------- Results ---------------- -->
-      <section id="results" class="results is-hidden" role="dialog" aria-label="Result">
+      <section id="results" class="results is-hidden" role="dialog" aria-modal="true" aria-labelledby="results-title">
         <div class="results-card">
           <p class="eyebrow" id="results-eyebrow">Complete</p>
           <h2 id="results-title"></h2>
@@ -256,10 +276,10 @@
       </section>
 
       <!-- ---------------- Pause ---------------- -->
-      <section id="pause" class="pause is-hidden" role="dialog" aria-label="Paused">
+      <section id="pause" class="pause is-hidden" role="dialog" aria-modal="true" aria-labelledby="pause-title">
         <div class="pause-card">
-          <p class="eyebrow">Paused</p>
-          <h2 id="pause-title">Meridian City</h2>
+          <p class="eyebrow">Take a breath</p>
+          <h2 id="pause-title">Meridian City</h2><p class="pause-caption">The city can wait a moment.</p>
           <button class="primary-button" id="pause-resume" type="button">Resume</button>
           <button class="link-button" id="pause-restart" type="button">Restart</button>
           <button class="link-button" id="pause-quit" type="button">Quit to menu</button>
@@ -267,7 +287,7 @@
       </section>
 
       <section id="error-screen" class="error-screen is-hidden" role="alert">
-        <p class="eyebrow">Startup fault</p>
+        <p class="eyebrow">Unable to start</p>
         <h1>Couldn't enter Meridian</h1>
         <pre id="error-message"></pre>
       </section>

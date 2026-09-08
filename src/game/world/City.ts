@@ -4,15 +4,18 @@ import type { Quality } from "../core/Save";
 import { CollisionGrid, type Solid } from "./Collision";
 import { Palette } from "./Materials";
 import { Sky } from "./Sky";
-import { FACADE_TILE_METERS, GRASS_TILE_METERS, SIDEWALK_TILE_METERS } from "./Textures";
+import { StaticBoxBatch } from "./StaticGeometry";
+import { createSignTexture, FACADE_TILE_METERS, GRASS_TILE_METERS, SIDEWALK_TILE_METERS } from "./Textures";
 import { buildLandmarks, type BuildContext, type LandmarkSpec } from "./Landmarks";
+import { buildExpansionBlock, buildRiverfront, buildHorizon } from "./WorldArt";
 
 /* ------------------------------------------------------------------ */
 /* Layout constants                                                    */
 /* ------------------------------------------------------------------ */
 
-/** Blocks from the centre to the edge; 25 x 25 blocks ≈ 3.7 km across. */
-const GRID_RADIUS = 12;
+/** 37 × 37 blocks; the original 25 × 25 city remains at its original coordinates. */
+const GRID_RADIUS = 18;
+export const LEGACY_GRID_RADIUS = 12;
 const BLOCK_PITCH = 150;
 const BLOCK_SIZE = 110;
 export const ROAD_HALF = 20;
@@ -26,7 +29,7 @@ const WATER_Y = 0.06;
 
 /** The river runs down this block column; bridges cross at these rows. */
 const RIVER_COLUMN = 7;
-const BRIDGE_ROWS = [-7, 0, 7];
+export const BRIDGE_ROWS = [-14, -7, 0, 7, 14];
 
 /* ------------------------------------------------------------------ */
 /* Districts                                                           */
@@ -38,7 +41,11 @@ export type DistrictId =
   | "old-meridian"
   | "kestrel-docks"
   | "marrow-hill"
-  | "midtown";
+  | "midtown"
+  | "northline"
+  | "westhaven"
+  | "foundry-belt"
+  | "saltmere";
 
 interface District {
   id: DistrictId;
@@ -55,6 +62,10 @@ interface District {
 }
 
 export const DISTRICTS: Record<DistrictId, District> = {
+  northline: { id: "northline", name: "Northline", blurb: "Copper observatories, transit halls and the city’s open northern sky.", styles: ["institute-white", "glass-tower"], minHeight: 20, maxHeight: 90, centrality: 0.2, parkChance: 0.2, carChance: 0.15 },
+  westhaven: { id: "westhaven", name: "Westhaven", blurb: "Garden terraces, courtyards and the reservoir that keeps Meridian running.", styles: ["sandstone-deco", "brick-mid"], minHeight: 10, maxHeight: 32, centrality: 0, parkChance: 0.25, carChance: 0.18 },
+  "foundry-belt": { id: "foundry-belt", name: "The Foundry Belt", blurb: "Working yards, smokestacks and long roads between the old industries.", styles: ["brick-mid", "panel-dark"], minHeight: 12, maxHeight: 40, centrality: 0, parkChance: 0.08, carChance: 0.12 },
+  saltmere: { id: "saltmere", name: "Saltmere", blurb: "Ferry halls, painted freight stacks and a lighthouse above the eastern city.", styles: ["institute-white", "concrete-block"], minHeight: 12, maxHeight: 56, centrality: 0, parkChance: 0.12, carChance: 0.12 },
   crest: {
     id: "crest",
     name: "The Crest",
@@ -124,6 +135,12 @@ export const DISTRICTS: Record<DistrictId, District> = {
 };
 
 export function districtAt(gx: number, gz: number): District {
+  if (Math.abs(gx) > LEGACY_GRID_RADIUS || Math.abs(gz) > LEGACY_GRID_RADIUS) {
+    if (gx > LEGACY_GRID_RADIUS) return DISTRICTS.saltmere;
+    if (gx < -LEGACY_GRID_RADIUS) return DISTRICTS.westhaven;
+    if (gz > LEGACY_GRID_RADIUS) return DISTRICTS.northline;
+    return DISTRICTS["foundry-belt"];
+  }
   if (gx > RIVER_COLUMN) return DISTRICTS["kestrel-docks"];
   if (Math.abs(gx) <= 3 && Math.abs(gz) <= 3) return DISTRICTS.crest;
   if (gz >= 4 && gx <= 4) return DISTRICTS["halcyon-row"];
@@ -217,6 +234,12 @@ const LANDMARK_SPECS: LandmarkSpec[] = [
     block: [RIVER_COLUMN, 0],
     accent: "#9aa4ab",
   },
+  { id: "northline-observatory", name: "Northline Observatory", subtitle: "Meridian Sky Survey", kind: "observatory", block: [-5, 16], accent: "#6edac3" },
+  { id: "westhaven-reservoir", name: "Westhaven Reservoir", subtitle: "Water for Every Block", kind: "reservoir", block: [-16, 5], accent: "#7ac8d1" },
+  { id: "foundry-exchange", name: "Foundry Exchange", subtitle: "The City Works Here", kind: "foundry", block: [-5, -16], accent: "#e9a162" },
+  { id: "saltmere-terminal", name: "Saltmere Terminal", subtitle: "Eastbound / Homebound", kind: "terminal", block: [15, -4], accent: "#e89c72" },
+  { id: "beacon-point", name: "Beacon Point", subtitle: "A Light for the Last Ferry", kind: "lighthouse", block: [16, 14], accent: "#f8c974" },
+  { id: "northline-station", name: "Northline Station", subtitle: "The Outer Loop", kind: "station", block: [3, 15], accent: "#71c9b5" },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -230,6 +253,8 @@ interface Chunk {
   bulk: Map<string, Mesh[]>;
   /** Clutter: cars, lamps, trees. Hidden past the detail radius. */
   detail: Map<string, Mesh[]>;
+  silhouettes: Mesh[];
+  mergedSilhouettes: Mesh[];
   mergedBulk: Mesh[];
   mergedDetail: Mesh[];
 }
@@ -263,6 +288,11 @@ export class City {
   // Art detail must never perturb the layout RNG used by saved routes/motes.
   private readonly artRng = mulberry32(0xa47d37);
   private detailRadius: number;
+  private readonly structureRadius: number;
+  private readonly horizonRadius: number;
+  private readonly expansionRng = mulberry32(0x4e574349);
+  private readonly districtSignKeys = new Set<string>();
+  private readonly boxBatches = new Map<string, { batch: StaticBoxBatch; x: number; z: number; material: string; detail: boolean }>();
   private readonly scratchNormal = new Vector3();
 
   constructor(
@@ -272,6 +302,8 @@ export class City {
   ) {
     this.rng = mulberry32(seed);
     this.detailRadius = quality === "low" ? 260 : quality === "medium" ? 420 : 620;
+    this.structureRadius = quality === "low" ? 850 : quality === "medium" ? 1150 : 1450;
+    this.horizonRadius = quality === "low" ? 2300 : 3100;
     this.palette = new Palette(scene, this.rng, ROAD_HALF);
     this.sky = new Sky(scene, this.rng, quality, this.extent);
     this.build(quality);
@@ -422,7 +454,11 @@ export class City {
     return this.nearestRoad(from.add(new Vector3(minDistance, 0, 0)));
   }
 
-  /** Distance-based clutter culling; called once per frame with the camera. */
+  /**
+   * Resident city cells: full architecture nearby, one low-poly skyline mesh
+   * per distant cell, and no render work beyond the horizon. Collision uses
+   * its independent spatial hash and remains available during fast travel.
+   */
   updateStreaming(focus: Vector3): void {
     const radiusSq = this.detailRadius * this.detailRadius;
     for (const chunk of this.chunks) {
@@ -432,7 +468,12 @@ export class City {
       const halfSpan = CHUNK_BLOCKS * BLOCK_PITCH * 0.5;
       const dx = Math.max(0, Math.abs(chunk.centerX - focus.x) - halfSpan);
       const dz = Math.max(0, Math.abs(chunk.centerZ - focus.z) - halfSpan);
-      const near = dx * dx + dz * dz < radiusSq;
+      const distanceSq = dx * dx + dz * dz;
+      const near = distanceSq < radiusSq;
+      const full = distanceSq < this.structureRadius * this.structureRadius;
+      const horizon = !full && distanceSq < this.horizonRadius * this.horizonRadius;
+      for (const mesh of chunk.mergedBulk) if (mesh.isEnabled() !== full) mesh.setEnabled(full);
+      for (const mesh of chunk.mergedSilhouettes) if (mesh.isEnabled() !== horizon) mesh.setEnabled(horizon);
       for (const mesh of chunk.mergedDetail) {
         if (mesh.isEnabled() !== near) mesh.setEnabled(near);
       }
@@ -453,11 +494,23 @@ export class City {
 
     const landmarkBlocks = new Set(LANDMARK_SPECS.map((spec) => `${spec.block[0]},${spec.block[1]}`));
 
-    for (let gx = -GRID_RADIUS; gx <= GRID_RADIUS; gx += 1) {
-      for (let gz = -GRID_RADIUS; gz <= GRID_RADIUS; gz += 1) {
+    for (let gx = -LEGACY_GRID_RADIUS; gx <= LEGACY_GRID_RADIUS; gx += 1) {
+      for (let gz = -LEGACY_GRID_RADIUS; gz <= LEGACY_GRID_RADIUS; gz += 1) {
         if (gx === RIVER_COLUMN && !BRIDGE_ROWS.includes(gz)) continue;
         if (landmarkBlocks.has(`${gx},${gz}`)) continue;
         this.buildBlock(gx, gz, rng, quality);
+      }
+    }
+
+    // Append the outer neighborhoods only after consuming the original layout
+    // stream. Expansion art never moves a saved rooftop or changes a mote ID.
+    for (let gx = -GRID_RADIUS; gx <= GRID_RADIUS; gx += 1) {
+      for (let gz = -GRID_RADIUS; gz <= GRID_RADIUS; gz += 1) {
+        if (Math.abs(gx) <= LEGACY_GRID_RADIUS && Math.abs(gz) <= LEGACY_GRID_RADIUS) continue;
+        if (gx === RIVER_COLUMN && !BRIDGE_ROWS.includes(gz)) continue;
+        if (landmarkBlocks.has(`${gx},${gz}`)) continue;
+        if (gx === RIVER_COLUMN) this.buildBlock(gx, gz, this.expansionRng, quality);
+        else buildExpansionBlock(this.buildContext(), gx, gz, districtAt(gx, gz).id, this.expansionRng, quality);
       }
     }
 
@@ -476,6 +529,9 @@ export class City {
     }
     buildLandmarks(this.buildContext(), LANDMARK_SPECS, BLOCK_PITCH, BLOCK_SIZE, KERB_Y);
 
+    buildRiverfront(this.buildContext(), this.extent, BRIDGE_ROWS);
+    buildHorizon(this.buildContext(), this.extent);
+    this.flushBoxes();
     this.mergeChunks();
     this.updateStreaming(this.start);
     this.palette.freeze();
@@ -489,6 +545,8 @@ export class City {
       solid: (solid: Solid) => this.grid.add(solid),
       push: (materialKey: string, mesh: Mesh, detail = false) => this.addMesh(materialKey, mesh, detail),
       shadowCaster: (mesh: Mesh) => this.sky.shadows.addShadowCaster(mesh),
+      silhouette: (x, z, width, depth, height, base = KERB_Y) => this.addSilhouette(x, z, width, depth, height, base),
+      box: (key, x, y, z, width, height, depth, detail = false, uv) => this.queueBox(key, x, y, z, width, height, depth, detail, uv),
     };
   }
 
@@ -598,6 +656,7 @@ export class City {
     }
 
     this.buildStreetlights(gx, gz, centerX, centerZ);
+    if (gx % 4 === 0 && gz % 4 === 0) this.buildDistrictSign(district, centerX + 52, centerZ + 30);
     if (quality !== "low") {
       // Street trees frame the avenues while leaving their full width clear.
       for (const side of [-1, 1]) this.buildTree(this.artRng, centerX + side * 51, centerZ - 38);
@@ -605,6 +664,7 @@ export class City {
     if (quality !== "low") this.buildParkedCars(rng, centerX, centerZ, district.carChance);
 
     if (isPark) {
+      this.dressPark(centerX, centerZ);
       const trees = quality === "low" ? 5 : 9;
       for (let i = 0; i < trees; i += 1) {
         this.buildTree(rng, centerX + (rng() - 0.5) * 84, centerZ + (rng() - 0.5) * 84);
@@ -630,7 +690,7 @@ export class City {
     const width = 40 + rng() * 8;
     const depth = 40 + rng() * 8;
     const centrality =
-      1 - Math.min(1, Math.hypot(gx, gz) / (GRID_RADIUS * 1.15));
+      1 - Math.min(1, Math.hypot(gx, gz) / (LEGACY_GRID_RADIUS * 1.15));
     const height =
       district.minHeight +
       rng() * (district.maxHeight - district.minHeight) * (0.45 + centrality * district.centrality);
@@ -646,6 +706,7 @@ export class City {
     this.addMesh(materialKey, tower, false);
 
     this.dressTower(x, z, width, depth, height, styleId);
+    this.addSilhouette(x, z, width, depth, height + 1.1);
 
     // Parapet lip: gives the roof an edge to mantle onto and reads at range.
     const parapet = MeshBuilder.CreateBox(
@@ -699,11 +760,9 @@ export class City {
     const glass = style === "glass-tower" || style === "panel-dark";
     const art = this.artRng;
     const box = (key: string, dx: number, y: number, dz: number, width: number, height: number, depth: number, detail = false): void => {
-      const mesh = MeshBuilder.CreateBox(`architecture-${key}`, { width, height, depth }, this.scene);
-      mesh.position.set(x + dx, KERB_Y + y, z + dz);
-      this.addMesh(key, mesh, detail);
+      this.queueBox(key, x + dx, KERB_Y + y, z + dz, width, height, depth, detail);
     };
-    const trim = glass ? "steel-bright" : "warm-stone";
+    const trim = glass ? (art() < 0.45 ? "copper" : "steel-bright") : "warm-stone";
     // Two facade languages: curtain-wall fins and masonry cornices. Slender
     // visual relief keeps the existing collision envelope and routes stable.
     if (glass) {
@@ -715,7 +774,9 @@ export class City {
       }
       const bandY = h * (0.6 + art() * 0.18);
       box("steel", 0, bandY, 0, w + 0.3, 1.2, d + 0.3);
-      box("cyan-light", 0, h - 0.4, -d / 2 - 0.12, w * 0.92, 0.18, 0.1);
+      box(style === "glass-tower" ? "cyan-light" : "warm-light", 0, h - 0.4, -d / 2 - 0.12, w * 0.92, 0.18, 0.1);
+      // Contrasting opaque spandrels make the crown read as a designed tier.
+      for (const side of [-1, 1]) box(trim, side * (w / 2 - 1.4), h - 3, 0, 2.8, 6, d + 0.16);
     } else {
       for (let y = 5; y < h; y += 12) box(trim, 0, y, 0, w + 0.4, 0.42, d + 0.4);
       for (const side of [-1, 1]) {
@@ -730,8 +791,47 @@ export class City {
       box(trim, 0, 4.4, side * (d / 2 + 0.18), 4, 0.28, 0.4, true);
       box("street-light", 0, 3.85, side * (d / 2 + 0.22), 2.6, 0.08, 0.05, true);
     }
+    if (!glass) {
+      // Occupied storefront bays belong at street level, never repeated up a tower.
+      const awning = style === "brick-mid" ? "oxidized-copper" : "terracotta";
+      for (const side of [-1, 1]) for (const offset of [-0.3, 0.3]) {
+        box("car-glass", offset * w, 2.05, side * (d / 2 + 0.12), w * 0.23, 3.1, 0.12, true);
+        box(awning, offset * w, 4.05, side * (d / 2 + 0.95), w * 0.29, 0.3, 2.1, true);
+        this.grid.add({ minX: x + offset * w - w * 0.145, maxX: x + offset * w + w * 0.145, minZ: z + side * (d / 2 + 0.95) - 1.05, maxZ: z + side * (d / 2 + 0.95) + 1.05, bottom: KERB_Y + 3.9, top: KERB_Y + 4.2, climbable: false });
+      }
+    }
     // Roof equipment stays below the unchanged parapet collision surface.
     box("steel", 0, h + 0.3, 0, w * 0.38, 0.6, d * 0.24, true);
+  }
+
+  private dressPark(cx: number, cz: number): void {
+    for (const vertical of [false, true]) {
+      const path = MeshBuilder.CreateBox("pocket-park-path", { width: vertical ? 7 : 108, depth: vertical ? 108 : 7, height: 0.04 }, this.scene);
+      path.position.set(cx, KERB_Y + 0.02, cz);
+      this.addMesh("park-path", path, false);
+    }
+    for (const side of [-1, 1]) {
+      const seat = MeshBuilder.CreateBox("pocket-park-seat", { width: 7, depth: 1.4, height: 0.65 }, this.scene);
+      seat.position.set(cx + side * 16, KERB_Y + 0.325, cz - 11);
+      this.addMesh("copper", seat, true);
+      this.grid.add({ minX: cx + side * 16 - 3.5, maxX: cx + side * 16 + 3.5, minZ: cz - 11.7, maxZ: cz - 10.3, bottom: KERB_Y, top: KERB_Y + 0.65, climbable: false });
+    }
+  }
+
+  private buildDistrictSign(district: District, x: number, z: number): void {
+    const key = `district-sign:${district.id}`;
+    if (!this.districtSignKeys.has(key)) {
+      const texture = createSignTexture(this.scene, key, district.name.toUpperCase(), "MERIDIAN / KEEP MOVING", district.id === "old-meridian" ? "#cb8967" : "#71c5c4");
+      this.palette.emissiveTextured(key, texture, 0.68);
+      this.districtSignKeys.add(key);
+    }
+    const plate = MeshBuilder.CreateBox(key, { width: 0.18, depth: 4.8, height: 1.4 }, this.scene);
+    plate.position.set(x, KERB_Y + 4.7, z);
+    this.addMesh(key, plate, true);
+    const post = MeshBuilder.CreateBox("district-sign-post", { width: 0.25, depth: 0.25, height: 5.4 }, this.scene);
+    post.position.set(x, KERB_Y + 2.7, z);
+    this.addMesh("steel", post, true);
+    this.grid.add({ minX: x - 0.15, maxX: x + 0.15, minZ: z - 0.15, maxZ: z + 0.15, bottom: KERB_Y, top: KERB_Y + 5.4, climbable: false });
   }
 
   private buildBridgeDeck(centerX: number, centerZ: number): void {
@@ -742,6 +842,7 @@ export class City {
     );
     deck.position.set(centerX, KERB_Y - 0.7, centerZ);
     this.addMesh("concrete", deck, false);
+    this.grid.add({ minX: centerX - (BLOCK_PITCH + 6) / 2, maxX: centerX + (BLOCK_PITCH + 6) / 2, minZ: centerZ - BLOCK_SIZE / 2, maxZ: centerZ + BLOCK_SIZE / 2, bottom: KERB_Y - 1.4, top: KERB_Y, climbable: false });
 
     for (const side of [-1, 1] as const) {
       const rail = MeshBuilder.CreateBox(
@@ -751,6 +852,7 @@ export class City {
       );
       rail.position.set(centerX, KERB_Y + 0.65, centerZ + side * BLOCK_SIZE * 0.5);
       this.addMesh("steel", rail, false);
+      this.grid.add({ minX: centerX - (BLOCK_PITCH + 6) / 2, maxX: centerX + (BLOCK_PITCH + 6) / 2, minZ: centerZ + side * BLOCK_SIZE / 2 - 0.3, maxZ: centerZ + side * BLOCK_SIZE / 2 + 0.3, bottom: KERB_Y, top: KERB_Y + 1.3, climbable: false });
     }
   }
 
@@ -769,7 +871,7 @@ export class City {
     for (let i = 0; i < clusters; i += 1) {
       const crown = MeshBuilder.CreateSphere(
         `tree-crown-${x.toFixed(1)}-${z.toFixed(1)}-${i}`,
-        { diameter: (3.8 + rng() * 2.8) * scale, segments: 10 },
+        { diameter: (3.8 + rng() * 2.8) * scale, segments: 6 },
         this.scene,
       );
       crown.position.set(
@@ -928,6 +1030,8 @@ export class City {
       chunk = {
         centerX: (cx + 0.5) * span - this.extent,
         centerZ: (cz + 0.5) * span - this.extent,
+        silhouettes: [],
+        mergedSilhouettes: [],
         bulk: new Map(),
         detail: new Map(),
         mergedBulk: [],
@@ -943,6 +1047,36 @@ export class City {
       target.set(materialKey, list);
     }
     list.push(mesh);
+  }
+
+  private queueBox(material: string, x: number, y: number, z: number, width: number, height: number, depth: number, detail = false, uv?: Vector4[]): void {
+    const key = `${this.chunkIndex(x, z)}:${detail ? 1 : 0}:${material}`;
+    let item = this.boxBatches.get(key);
+    if (!item) {
+      item = { batch: new StaticBoxBatch(), x, z, material, detail };
+      this.boxBatches.set(key, item);
+    }
+    item.batch.add(x, y, z, width, height, depth, uv);
+  }
+
+  private flushBoxes(): void {
+    // Structural batches create their chunks before skyline-only batches attach.
+    for (const item of this.boxBatches.values()) {
+      if (item.material === "__skyline") continue;
+      this.pushToChunk(item.x, item.z, item.material, item.batch.build(this.scene, "static-cell-boxes"), item.detail);
+    }
+    for (const item of this.boxBatches.values()) {
+      if (item.material !== "__skyline") continue;
+      const mesh = item.batch.build(this.scene, "skyline-cell-boxes");
+      const chunk = this.chunks[this.chunkIndex(item.x, item.z)];
+      if (chunk) chunk.silhouettes.push(mesh);
+      else mesh.dispose();
+    }
+    this.boxBatches.clear();
+  }
+
+  private addSilhouette(x: number, z: number, width: number, depth: number, height: number, base = KERB_Y): void {
+    this.queueBox("__skyline", x, base + height * 0.5, z, width, height, depth);
   }
 
   private mergeChunks(): void {
@@ -961,8 +1095,14 @@ export class City {
       }
       for (const [materialKey, meshes] of chunk.detail) {
         const merged = this.mergeGroup(materialKey, meshes);
-        if (merged) chunk.mergedDetail.push(merged);
+        if (merged) {
+          chunk.mergedDetail.push(merged);
+          if (materialKey === "trunk" || materialKey.startsWith("leaf")) this.sky.shadows.addShadowCaster(merged, false);
+        }
       }
+      const skyline = this.mergeGroup("skyline", chunk.silhouettes);
+      if (skyline) chunk.mergedSilhouettes.push(skyline);
+      chunk.silhouettes.length = 0;
       chunk.bulk.clear();
       chunk.detail.clear();
     }

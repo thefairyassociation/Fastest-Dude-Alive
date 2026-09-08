@@ -1,129 +1,105 @@
 /**
- * The people of Meridian City.
- *
- * A note for future contributors: this cast is shaped like a serialised
- * superhero drama on purpose — the lab accident, the team in the basement,
- * the detective who raised him, the reporter who names him, the mentor with a
- * secret — but every name, organisation and power here is original to this
- * project. Keep it that way. See the asset policy in the README.
+ * Meridian's cast. Public trust, emergency work and who gets counted by a city.
+ * Keep motives legible before a reveal: nobody needs a time-travel explanation.
  */
-
 export interface CastMember {
   id: string;
   name: string;
-  /** How the HUD labels them when they speak. */
   short: string;
   role: string;
-  /** Speech colour, used by the dialogue panel. */
   color: string;
   bio: string;
 }
 
 export const CAST: Record<string, CastMember> = {
   nolan: {
-    id: "nolan",
-    name: "Nolan Reyes",
-    short: "Nolan",
-    role: "Forensic technician, MCPD Precinct Seven",
-    color: "#e8a53c",
-    bio:
-      "Twenty-seven, chronically late, unusually good at telling you what happened in a room " +
-      "from the dust in it. He was on the precinct roof logging evidence when the resonance " +
-      "front came down the antenna mast. He woke up eleven months later.",
-  },
-  vance: {
-    id: "vance",
-    name: "Dr. Aldous Vance",
-    short: "Vance",
-    role: "Founder, Halcyon Labs",
-    color: "#8fd0ff",
-    bio:
-      "Built the resonance ring, lost the use of his legs the night it failed, and lost the " +
-      "city's goodwill the morning after. Speaks to Nolan like a man who already knows how " +
-      "the story ends and is being careful not to spoil it.",
+    id: "nolan", name: "Nolan Reyes", short: "Nolan", color: "#e8a53c",
+    role: "Municipal courier · volunteer responder",
+    bio: "Nolan knows Meridian by the addresses that delivery apps refuse. When a bridge relay failed, " +
+      "he pulled a maintenance worker clear and took its resonance discharge through his body. " +
+      "Two hours later, he could outrun an ambulance. He would like to know why he has to.",
   },
   wren: {
-    id: "wren",
-    name: "Dr. Wren Adeyemi",
-    short: "Wren",
-    role: "Bio-physicist, Halcyon Labs",
-    color: "#bfe6f2",
-    bio:
-      "Kept Nolan breathing for eleven months and has never once said she is glad she did. " +
-      "Her fiancé Aaron was inside the ring room when it went. She has not moved his coat.",
+    id: "wren", name: "Dr. Wren Adeyemi", short: "Wren", color: "#bfe6f2",
+    role: "Emergency physician · Meridian General",
+    bio: "Wren runs a clinic on the city's least reliable power circuit. She treats Nolan as a patient " +
+      "with a dangerous new job, not an experiment. She has kept a handwritten record of every " +
+      "outage since the official one stopped matching her ward.",
   },
   teo: {
-    id: "teo",
-    name: "Mateo Salcedo",
-    short: "Teo",
-    role: "Mechanical engineer, Halcyon Labs",
-    color: "#7fd8a0",
-    bio:
-      "Built the suit out of firefighter tri-polymer, a stolen heat-exchange lattice and " +
-      "roughly nine hundred hours he will never get back. Names every rogue. Nobody asked " +
-      "him to. Nobody has managed to stop him.",
+    id: "teo", name: "Mateo Salcedo", short: "Teo", color: "#7fd8a0",
+    role: "Transit maintenance engineer",
+    bio: "A shift engineer who keeps obsolete equipment working because people still depend on it. " +
+      "Teo adapted a rescue suit to bleed off Nolan's heat. He distrusts a system with no manual " +
+      "override and a repair nobody can do with the tools they own.",
   },
   solomon: {
-    id: "solomon",
-    name: "Detective Solomon Kade",
-    short: "Kade",
-    role: "MCPD, Precinct Seven",
-    color: "#d6b483",
-    bio:
-      "Took Nolan in at eleven, the week the state took his father. Has spent sixteen years " +
-      "not saying the thing he thinks about that case. Does not believe in metahumans, which " +
-      "is going to be a problem.",
+    id: "solomon", name: "Solomon Kade", short: "Kade", color: "#d6b483",
+    role: "Dispatcher · Precinct Seven emergency desk",
+    bio: "Twenty-four years of dispatch, including the transition to automated priority routing. " +
+      "He signed off on a shorter response-time target and is beginning to ask who disappeared " +
+      "from the average. His house is the neighborhood's unofficial charging station.",
   },
   nadia: {
-    id: "nadia",
-    name: "Nadia Kade",
-    short: "Nadia",
-    role: "Reporter, The Meridian Ledger",
-    color: "#f2a8c0",
-    bio:
-      "Solomon's daughter, Nolan's foster sister, and the only person in Meridian filing " +
-      "copy about the blur downtown. She named him in print before the lab named him in the " +
-      "basement, which Teo has still not forgiven.",
+    id: "nadia", name: "Nadia Kade", short: "Nadia", color: "#f2a8c0",
+    role: "Reporter · The Meridian Ledger",
+    bio: "Nadia covers municipal contracts, which become more interesting when somebody tries to " +
+      "destroy them. She checks her father's dispatch records as hard as anybody else's. She " +
+      "wants testimony people can challenge, not a hero's version of the night.",
+  },
+  vance: {
+    id: "vance", name: "Dr. Aldous Vance", short: "Vance", color: "#8fd0ff",
+    role: "Architect · Halcyon Priority Grid",
+    bio: "Built a resonance network to keep hospitals and transit alive through outages. He accepted " +
+      "premium routing to pay for expansion, then let expansion become the excuse for every " +
+      "exception. He is publicly responsible, technically useful and not entitled to forgiveness.",
   },
   sable: {
-    id: "sable",
-    name: "Captain Imogen Sable",
-    short: "Sable",
-    role: "MCPD, Metahuman Response",
-    color: "#a9b6bf",
-    bio:
-      "Runs a task force she does not believe should exist, competently, out of spite. " +
-      "Wants the blur on a payroll or in a cell and is genuinely undecided which.",
+    id: "sable", name: "Captain Imogen Sable", short: "Sable", color: "#a9b6bf",
+    role: "Meridian Emergency Coordination",
+    bio: "Responsible for keeping evacuation routes open when the routing network itself becomes " +
+      "the hazard. She initially mistakes one very fast responder for spare capacity. Her job " +
+      "becomes learning to build a plan that survives his absence.",
   },
   vantage: {
-    id: "vantage",
-    name: "Vantage",
-    short: "Vantage",
-    role: "Unknown",
-    color: "#f5c542",
-    bio:
-      "Bone-white and gold, and everything about him arrives a half-second before he does. " +
-      "He is not from now. He has been waiting a very long time for someone to be fast enough " +
-      "to be useful.",
+    id: "vantage", name: "Iona Vale", short: "Vantage", color: "#f5c542",
+    role: "Former rescue commander · Vantage operator",
+    bio: "Iona trained Meridian's rescue crews until her district was repeatedly denied backup. " +
+      "Her predictive suit reads the city's routing grid and intercepts a runner before he turns. " +
+      "She plans to destroy centralized priority control, even if the blackout harms the people " +
+      "she once promised to protect.",
   },
   elena: {
-    id: "elena",
-    name: "Elena Reyes",
-    short: "Elena",
-    role: "Nolan's mother",
-    color: "#ffd9a0",
-    bio: "Died on a Tuesday in October, twenty-two years ago, in a kitchen full of light that had no source.",
+    id: "elena", name: "Elena Reyes", short: "Elena", color: "#ffd9a0",
+    role: "Resident coordinator · Westhaven",
+    bio: "Nolan's mother organizes a residents' phone tree, knows whose lift stops in an outage, " +
+      "and refuses to describe doing essential work without a budget as resilience.",
   },
   marcus: {
-    id: "marcus",
-    name: "Marcus Reyes",
-    short: "Marcus",
-    role: "Ironvale Correctional, inmate 41103",
-    color: "#b9a184",
-    bio:
-      "Convicted of his wife's murder on physical evidence that made no sense to anyone, " +
-      "including the technician who eventually re-read it at superhuman speed. Stopped " +
-      "protesting his innocence in year nine.",
+    id: "marcus", name: "Marcus Reyes", short: "Marcus", color: "#b9a184",
+    role: "Retired ferry mechanic · Saltmere",
+    bio: "Nolan's father maintains the harbor's community launch. He is proud of his son and " +
+      "worried that the city will find it cheaper to depend on him than to fix anything.",
+  },
+  kiln: {
+    id: "kiln", name: "Roland Boyce", short: "Kiln", color: "#f18c55",
+    role: "Demolition contractor · Kiln operator",
+    bio: "Roland's industrial heat rig destroys a relay in seconds. The contracts behind his work " +
+      "matter more than the codename: somebody pays him to make outages look accidental.",
+  },
+  gale: {
+    id: "gale", name: "Margo Sable", short: "Gale", color: "#a7d6e8",
+    role: "Pressure-systems specialist",
+    bio: "Margo designed ventilation for transit tunnels. She now uses a stolen pressure rig to " +
+      "disable emergency cooling. She believes a controlled failure will force a repair; her " +
+      "definition of controlled does not include the people underneath it.",
+  },
+  coldsnap: {
+    id: "coldsnap", name: "Cassian Vok", short: "Coldsnap", color: "#b6dafa",
+    role: "Containment specialist",
+    bio: "Cassian carries a damping field designed for dangerous resonance equipment. He hires it " +
+      "out to anyone who wants a street nobody can cross. He understands a public emergency, " +
+      "but tends to invoice it first.",
   },
 };
 

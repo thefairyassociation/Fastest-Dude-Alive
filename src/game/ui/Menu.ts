@@ -29,6 +29,11 @@ export class Menu {
   private readonly resultsPrimary = element("results-primary");
   private readonly pause = element("pause");
   private readonly pauseTitle = element("pause-title");
+  private activePanel = "menu-root";
+  private padConfirmHeld = false;
+  private padBackHeld = false;
+  private padDirection = 0;
+  private padRepeatAt = 0;
 
   constructor(
     private readonly save: Save,
@@ -60,6 +65,8 @@ export class Menu {
     element("results-secondary").addEventListener("click", () => this.callbacks.onQuit());
 
     this.wireSettings();
+    element("campaign-chapter-count").textContent = `${CHAPTERS.length} chapters / The campaign`;
+    this.wireNavigation();
   }
 
   /* ---------------- visibility ---------------- */
@@ -81,6 +88,7 @@ export class Menu {
   showPause(title: string): void {
     this.pauseTitle.textContent = title;
     this.pause.classList.remove("is-hidden");
+    this.focusFirst(this.pause);
   }
 
   hidePause(): void {
@@ -97,6 +105,7 @@ export class Menu {
     this.resultsBody.textContent = body;
     this.resultsPrimary.textContent = primaryLabel;
     this.results.classList.remove("is-hidden");
+    this.focusFirst(this.results);
   }
 
   hideResults(): void {
@@ -108,9 +117,14 @@ export class Menu {
   }
 
   private showPanel(id: string): void {
+    this.activePanel = id;
     for (const [key, panel] of this.panels) {
       panel.classList.toggle("is-hidden", key !== id);
+      panel.inert = key !== id;
     }
+    const panel = this.panels.get(id);
+    if (panel && this.visible) this.focusFirst(panel);
+    this.root.scrollTop = 0;
   }
 
   /* ---------------- content ---------------- */
@@ -119,9 +133,11 @@ export class Menu {
     const profile = this.save.data;
     const km = Math.round(profile.totalDistanceMeters / 100) / 10;
     const chapters = profile.campaign.completed.length;
+    const mph = this.save.settings.showSpeedInMph;
+    const best = Math.round(profile.topSpeedKph * (mph ? 0.621371 : 1));
     this.menuStat.textContent =
-      `${km.toFixed(1)} km run · ${profile.collected.length} motes · ` +
-      `${chapters}/${CHAPTERS.length} chapters · top ${Math.round(profile.topSpeedKph)} km/h`;
+      `${km.toFixed(1)} km travelled · ${profile.collected.length} motes found · ` +
+      `${chapters}/${CHAPTERS.length} chapters · best ${best} ${mph ? "mph" : "km/h"}`;
   }
 
   private buildChapters(): void {
@@ -144,12 +160,14 @@ export class Menu {
       card.type = "button";
       card.className = "chapter-card";
       card.disabled = !available;
+      card.classList.toggle("current", chapter.number === unlocked);
+      if (chapter.number === unlocked) card.setAttribute("aria-current", "step");
 
       const number = document.createElement("span");
       number.className = "chapter-number";
       number.textContent = chapter.number.toString().padStart(2, "0");
 
-      const body = document.createElement("div");
+      const body = document.createElement("span");
       const title = document.createElement("h3");
       title.textContent = chapter.title;
       const blurb = document.createElement("p");
@@ -176,6 +194,9 @@ export class Menu {
     const sensitivityValue = element("set-sensitivity-value");
     const reduced = element("set-reduced-motion") as HTMLInputElement;
     const mph = element("set-mph") as HTMLInputElement;
+    const volume = element("setting-volume") as HTMLInputElement;
+    const volumeValue = element("setting-volume-value");
+    const muted = element("setting-muted") as HTMLInputElement;
 
     const settings = this.save.settings;
     quality.value = settings.quality;
@@ -183,6 +204,20 @@ export class Menu {
     sensitivityValue.textContent = `${settings.lookSensitivity.toFixed(2)}×`;
     reduced.checked = settings.reducedMotion;
     mph.checked = settings.showSpeedInMph;
+    volume.value = settings.masterVolume.toString();
+    volumeValue.textContent = `${Math.round(settings.masterVolume * 100)}%`;
+    muted.checked = settings.muted;
+    volume.addEventListener("input", () => {
+      const value = Number(volume.value);
+      if (!Number.isFinite(value)) return;
+      volumeValue.textContent = `${Math.round(value * 100)}%`;
+      this.save.update((profile) => { profile.settings.masterVolume = value; });
+      this.callbacks.onSettingsChanged();
+    });
+    muted.addEventListener("change", () => {
+      this.save.update((profile) => { profile.settings.muted = muted.checked; });
+      this.callbacks.onSettingsChanged();
+    });
 
     quality.addEventListener("change", () => {
       const value = quality.value;
@@ -224,12 +259,124 @@ export class Menu {
       this.save.reset();
       quality.value = this.save.settings.quality;
       sensitivity.value = this.save.settings.lookSensitivity.toString();
+      sensitivityValue.textContent = `${this.save.settings.lookSensitivity.toFixed(2)}×`;
+      volume.value = this.save.settings.masterVolume.toString();
+      volumeValue.textContent = `${Math.round(this.save.settings.masterVolume * 100)}%`;
+      muted.checked = this.save.settings.muted;
       reduced.checked = this.save.settings.reducedMotion;
       mph.checked = this.save.settings.showSpeedInMph;
       this.refreshStats();
       this.callbacks.onSettingsChanged();
     });
   }
+  /** Native controls remain keyboard operable; the same focus model drives a pad. */
+  private wireNavigation(): void {
+    window.addEventListener("keydown", (event) => {
+      const scope = this.navigationScope();
+      if (!scope) return;
+      if (event.key === "Escape" && this.visible && this.activePanel !== "menu-root") {
+        event.preventDefault();
+        this.showPanel("menu-root");
+        return;
+      }
+      const active = document.activeElement;
+      const editing = active instanceof HTMLInputElement || active instanceof HTMLSelectElement;
+      if (!editing && ["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(event.key)) {
+        event.preventDefault();
+        this.moveFocus(scope, event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1);
+      } else if (event.key === "Tab") {
+        const controls = this.controls(scope);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey && (active === first || !scope.contains(active))) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && (active === last || !scope.contains(active))) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    });
+
+    const poll = (now: number) => {
+      const scope = this.navigationScope();
+      const pad = typeof navigator.getGamepads === "function"
+        ? Array.from(navigator.getGamepads()).find((entry) => entry?.connected)
+        : null;
+      const confirm = pad?.buttons[0]?.pressed === true;
+      const back = pad?.buttons[1]?.pressed === true;
+      let direction = 0;
+      if (pad) {
+        if (pad.buttons[12]?.pressed || (pad.axes[1] ?? 0) < -0.6) direction = -1;
+        if (pad.buttons[13]?.pressed || (pad.axes[1] ?? 0) > 0.6) direction = 1;
+      }
+      if (scope && !document.hidden) {
+        if (direction && (direction !== this.padDirection || now >= this.padRepeatAt)) {
+          this.moveFocus(scope, direction);
+          this.padRepeatAt = now + (direction !== this.padDirection ? 380 : 150);
+        }
+        const active = document.activeElement;
+        if (active && scope.contains(active)) {
+          const horizontal = pad?.buttons[14]?.pressed || (pad?.axes[0] ?? 0) < -0.6 ? -1
+            : pad?.buttons[15]?.pressed || (pad?.axes[0] ?? 0) > 0.6 ? 1 : 0;
+          if (horizontal && now >= this.padRepeatAt) {
+            this.adjustControl(active, horizontal);
+            this.padRepeatAt = now + 180;
+          }
+          if (confirm && !this.padConfirmHeld) {
+            if (active instanceof HTMLButtonElement) active.click();
+            else if (active instanceof HTMLInputElement && active.type === "checkbox") active.click();
+            else if (active instanceof HTMLSelectElement) this.adjustControl(active, 1);
+          }
+        } else if (confirm && !this.padConfirmHeld) this.focusFirst(scope);
+        if (back && !this.padBackHeld) {
+          if (this.visible && this.activePanel !== "menu-root") this.showPanel("menu-root");
+          else if (this.pauseVisible) this.callbacks.onResume();
+        }
+      }
+      this.padConfirmHeld = confirm;
+      this.padBackHeld = back;
+      this.padDirection = direction;
+      requestAnimationFrame(poll);
+    };
+    requestAnimationFrame(poll);
+  }
+
+  private navigationScope(): HTMLElement | null {
+    if (this.resultsVisible) return this.results;
+    if (this.pauseVisible) return this.pause;
+    if (this.visible) return this.panels.get(this.activePanel) ?? this.root;
+    return null;
+  }
+
+  private controls(scope: HTMLElement): HTMLElement[] {
+    return Array.from(scope.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), select:not(:disabled)"))
+      .filter((control) => !control.closest(".is-hidden") && !control.hidden);
+  }
+
+  private focusFirst(scope: HTMLElement): void {
+    this.controls(scope)[0]?.focus({ preventScroll: true });
+  }
+
+  private moveFocus(scope: HTMLElement, direction: number): void {
+    const controls = this.controls(scope);
+    if (!controls.length) return;
+    const index = controls.indexOf(document.activeElement as HTMLElement);
+    const next = index < 0 ? 0 : (index + direction + controls.length) % controls.length;
+    controls[next]?.focus({ preventScroll: true });
+    controls[next]?.scrollIntoView({ block: "nearest" });
+  }
+
+  private adjustControl(control: Element, direction: number): void {
+    if (control instanceof HTMLInputElement && control.type === "range") {
+      if (direction > 0) control.stepUp(); else control.stepDown();
+      control.dispatchEvent(new Event("input", { bubbles: true }));
+    } else if (control instanceof HTMLSelectElement) {
+      control.selectedIndex = Math.max(0, Math.min(control.options.length - 1, control.selectedIndex + direction));
+      control.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
+
 }
 
 function element(id: string): HTMLElement {

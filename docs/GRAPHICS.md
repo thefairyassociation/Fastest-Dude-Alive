@@ -1,5 +1,7 @@
 # Resonance suit / Meridian graphics overhaul
 
+> This page records the retained speedster revision and its visual checklist. For the expanded city, new rendering budgets, UI, population and current validation limits, see [the Meridian overhaul](OVERHAUL.md).
+
 ## Art direction
 
 The speedster is the focal point. Nolan's suit combines continuous matte crimson fabric, flush graphite stretch panels and restrained bronze trim. The screenshot-feedback revision removes floating chest/abdominal pieces and pale joint pads, slims the shoulders, and reshapes the gloves and boots into fitted running gear. A closed helmet and curved visor create a continuous head silhouette. Split amber chevrons across the scapulae continue down the spine; wrist/calf/heel inlays keep the character recognisable from behind. Focus changes the energy colour to blue.

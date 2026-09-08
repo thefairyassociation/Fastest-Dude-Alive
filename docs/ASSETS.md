@@ -54,3 +54,7 @@ Runtime dependencies are listed in `package.json` and pinned by `package-lock.js
 The new body profiles, surface panels, running boots, helmet, visor, resonance inlays and speed-ribbon geometry in `HeroModel.ts` and `SpeedTrails.ts` were authored for this repository and use its MIT licence. No downloaded character models, texture packs or third-party character designs were incorporated.
 
 `@napi-rs/canvas` 1.0.8 is a pinned MIT-licensed **development-only** dependency for CPU texture tests. It and its platform binaries are not imported by the game or shipped in the production bundle.
+
+## Minutes Owed expansion
+
+`WorldArt.ts`, `StaticGeometry.ts` and the expanded landmark factories generate the new borough architecture from source geometry. `CityLife.ts` generates instanced cars and citizens; `RouteGhost.ts` generates the pace-runner mesh. `audio/Soundscape.ts` synthesizes its own noise and oscillator sources through Web Audio. These additions introduce no downloaded artwork, recordings, fonts or runtime dependencies. The retained speedster and bundled font licences above still apply.

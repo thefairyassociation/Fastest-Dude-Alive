@@ -6,7 +6,7 @@ import {
   Scene,
   Vector3,
 } from "@babylonjs/core";
-import type { Rng } from "../core/Rng";
+import { mulberry32, type Rng } from "../core/Rng";
 import type { Save } from "../core/Save";
 import type { Effects } from "../fx/Effects";
 import type { City } from "../world/City";
@@ -28,7 +28,8 @@ interface Mote {
   spin: number;
 }
 
-const COUNT = 64;
+const LEGACY_COUNT = 64;
+const COUNT = 112;
 /** Motes only tick and draw within this range of the player. */
 const ACTIVE_RANGE = 400;
 
@@ -51,14 +52,18 @@ export class Collectibles {
     source.isPickable = false;
     source.setEnabled(false);
 
+    const expansionRng = mulberry32(0x4d4f5445);
     for (let i = 0; i < COUNT; i += 1) {
       const id = `mote-${i}`;
+      const random = i < LEGACY_COUNT ? rng : expansionRng;
       // Two thirds go up high; the rest keep street level interesting.
       const highUp = i % 3 !== 0;
-      const angle = rng() * Math.PI * 2;
-      const radius = 120 + rng() * (city.extent - 260);
-      const x = Math.cos(angle) * radius;
-      const z = Math.sin(angle) * radius;
+      const angle = random() * Math.PI * 2;
+      const radius = i < LEGACY_COUNT ? 120 + random() * (1875 - 260) : 2010 + random() * 480;
+      // A square ring reaches all four outer boroughs; original 64 keep their coordinates.
+      const scale = i < LEGACY_COUNT ? 1 : 1 / Math.max(Math.abs(Math.cos(angle)), Math.abs(Math.sin(angle)));
+      const x = Math.cos(angle) * radius * scale;
+      const z = Math.sin(angle) * radius * scale;
       const surface = city.groundHeight(x, z, 500);
       const lift = highUp ? 2.4 : 1.6;
       const position = new Vector3(x, surface + lift, z);
@@ -70,7 +75,17 @@ export class Collectibles {
       mesh.setEnabled(false);
       if (taken) this.collected += 1;
 
-      this.motes.push({ id, position, mesh, taken, spin: rng() * Math.PI * 2 });
+      this.motes.push({ id, position, mesh, taken, spin: random() * Math.PI * 2 });
+    }
+  }
+
+  /** Reconcile cached world objects after the player resets their profile. */
+  syncFromSave(): void {
+    this.collected = 0;
+    for (const mote of this.motes) {
+      mote.taken = this.save.hasCollected(mote.id);
+      if (mote.taken) this.collected += 1;
+      mote.mesh.setEnabled(false);
     }
   }
 

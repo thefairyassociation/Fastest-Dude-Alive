@@ -8,6 +8,7 @@ import {
   Vector3,
 } from "@babylonjs/core";
 import { clamp, damp } from "../core/Rng";
+import { distanceToLungeSquared } from "./CombatGeometry";
 
 /**
  * Rogues.
@@ -49,7 +50,7 @@ export const ROGUES: RogueDefinition[] = [
     damage: 11,
     suit: "#5c2a1e",
     accent: "#ff7a2f",
-    blurb: "Ran the smelting floor at Kestrel until the breach cooked it. Now he is the floor.",
+    blurb: "A demolition contractor with a heat rig, paid to make the relay failures look accidental.",
     taunt: "Stand still. You will anyway, eventually.",
   },
   {
@@ -62,7 +63,7 @@ export const ROGUES: RogueDefinition[] = [
     damage: 9,
     suit: "#243a52",
     accent: "#8fd0ff",
-    blurb: "Atmospheric researcher. Filed eleven warnings about the ring. Nobody read past the first.",
+    blurb: "A former transit pressure-systems engineer whose forced shutdown locks commuters inside.",
     taunt: "I told them what pressure does. Now I get to show you.",
   },
   {
@@ -75,7 +76,7 @@ export const ROGUES: RogueDefinition[] = [
     damage: 8,
     suit: "#2b3a44",
     accent: "#bfe6f2",
-    blurb: "A thief who worked out that you do not have to catch a speedster, only slow one.",
+    blurb: "A contractor using a hired resonance-damping containment rig to blockade Meridian's streets.",
     taunt: "Everyone's fast until the air gets thick.",
   },
   {
@@ -106,7 +107,7 @@ export const ROGUES: RogueDefinition[] = [
   },
   {
     id: "vantage",
-    name: "Unknown",
+    name: "Iona Vale",
     codename: "Vantage",
     archetype: "speedster",
     health: 46,
@@ -114,8 +115,8 @@ export const ROGUES: RogueDefinition[] = [
     damage: 15,
     suit: "#d8d2c4",
     accent: "#f5c542",
-    blurb: "Moves in negative resonance. Everything about him arrives before he does.",
-    taunt: "You have had this speed for a year. I have had it far longer.",
+    blurb: "Meridian's former emergency-routing commander. Her predictive rescue suit turns every possible escape into a scheduled arrival.",
+    taunt: "I have already routed your next three choices. Find a fourth.",
   },
 ];
 
@@ -171,6 +172,14 @@ export class Rogue {
     vulnerable: true,
   };
   private readonly landing = new Vector3();
+  private readonly attackDirection = new Vector3(0, 0, 1);
+  private readonly attackOrigin = new Vector3();
+  private readonly toPlayer = new Vector3();
+  private attackKind: "lunge" | "blast" | "sweep" = "lunge";
+  private attackSequence = 0;
+  private sweepRadius = 0;
+  private hitCooldown = 0;
+  private attackConnected = false;
   /** Set when a ranged wind-up resolves; cleared once the blast is applied. */
   private blastPending = false;
   private stride = 0;
@@ -181,6 +190,9 @@ export class Rogue {
   private readonly shoulder: [TransformNode, TransformNode];
   private readonly aura: Mesh;
   private readonly auraMaterial: PBRMaterial;
+  private readonly attackWarning: Mesh;
+  private readonly sweepRing: Mesh;
+  private readonly fieldRings: Mesh[] = [];
 
   constructor(scene: Scene, definition: RogueDefinition, spawn: Vector3) {
     this.definition = definition;
@@ -293,6 +305,24 @@ export class Rogue {
     this.aura.material = this.auraMaterial;
     this.aura.isPickable = false;
     this.aura.setEnabled(false);
+
+    this.attackWarning = MeshBuilder.CreateGround(`rogue-lane-${definition.id}`, { width: 8, height: 1 }, scene);
+    this.attackWarning.material = this.auraMaterial;
+    this.attackWarning.isPickable = false;
+    this.attackWarning.setEnabled(false);
+    this.sweepRing = MeshBuilder.CreateTorus(`rogue-target-${definition.id}`, { diameter: 2, thickness: 0.1, tessellation: 48 }, scene);
+    this.sweepRing.material = this.auraMaterial;
+    this.sweepRing.isPickable = false;
+    this.sweepRing.setEnabled(false);
+    if (definition.archetype === "zoner") {
+      for (let index = 0; index < 4; index += 1) {
+        const ring = MeshBuilder.CreateTorus(`rogue-field-${definition.id}-${index}`, { diameter: 32, thickness: 0.22, tessellation: 48 }, scene);
+        ring.material = this.auraMaterial;
+        ring.isPickable = false;
+        ring.setEnabled(false);
+        this.fieldRings.push(ring);
+      }
+    }
   }
 
   get position(): Vector3 {
@@ -305,10 +335,22 @@ export class Rogue {
 
   /** True while the rogue can be damaged — the window the player plays for. */
   get vulnerable(): boolean {
-    if (!this.alive || this.phantom) return false;
+    if (!this.alive || this.phantom || this.hitCooldown > 0) return false;
     // Speedsters are only open on the back swing; everyone else is fair game.
     if (this.definition.archetype !== "speedster") return true;
     return this.phase === "recover" || this.phase === "stagger";
+  }
+
+  /** The encounter HUD explains the active traversal counter, not just HP. */
+  get tacticHint(): string {
+    if (this.phase === "recover" || this.phase === "stagger") return "Recovery window — close the gap and strike";
+    if (this.definition.archetype === "speedster") {
+      if (this.attackKind === "sweep" && (this.phase === "telegraph" || this.phase === "strike")) return "Ground sweep — jump over the expanding ring";
+      return this.healthRatio <= 0.55 ? "Watch the lane; low-health sweeps must be jumped" : "Leave the marked lane, then punish the recovery";
+    }
+    if (this.definition.archetype === "zoner") return "Leave the marked blast; vault the lingering slow fields";
+    if (this.definition.archetype === "artillery") return "Aim is committed — move out of the marked circle";
+    return "Sidestep the marked charge; strike during recovery";
   }
 
   update(dt: number, playerPosition: Vector3, groundY: number): RogueOutcome {
@@ -323,6 +365,7 @@ export class Rogue {
 
     this.lifetime += dt;
     this.phaseTimer -= dt;
+    this.hitCooldown = Math.max(0, this.hitCooldown - dt);
 
     for (let i = this.fields.length - 1; i >= 0; i -= 1) {
       const field = this.fields[i];
@@ -331,31 +374,31 @@ export class Rogue {
       if (field.life <= 0) this.fields.splice(i, 1);
     }
 
-    const toPlayer = playerPosition.subtract(this.root.position);
+    const toPlayer = this.toPlayer.copyFrom(playerPosition).subtractInPlace(this.root.position);
     toPlayer.y = 0;
     const distance = toPlayer.length();
-    const direction = distance > 0.01 ? toPlayer.scale(1 / distance) : new Vector3(0, 0, 1);
+    const direction = distance > 0.01 ? toPlayer.scaleInPlace(1 / distance) : toPlayer.set(0, 0, 1);
 
     switch (this.phase) {
       case "approach":
-        this.approach(dt, direction, distance);
+        this.approach(dt, direction, distance, playerPosition);
         break;
       case "telegraph":
         if (this.phaseTimer <= 0) {
           this.phase = "strike";
-          this.phaseTimer = this.definition.archetype === "brawler" ? 0.45 : 0.2;
-          if (this.definition.archetype === "artillery" || this.definition.archetype === "zoner") {
-            this.landing.copyFrom(playerPosition);
+          this.phaseTimer = this.attackKind === "sweep" ? 0.48 : this.definition.archetype === "brawler" ? 0.45 : 0.2;
+          if (this.attackKind === "blast") {
             this.blastPending = true;
             out.projectile = this.landing;
             if (this.definition.archetype === "zoner") {
-              this.fields.push({ position: playerPosition.clone(), radius: 16, life: 6 });
+              if (this.fields.length >= 4) this.fields.shift();
+              this.fields.push({ position: this.landing.clone(), radius: 16, life: 6 });
             }
           }
         }
         break;
       case "strike":
-        this.strike(dt, direction, distance, playerPosition, out);
+        this.strike(dt, playerPosition, out);
         break;
       case "recover":
         this.velocity.scaleInPlace(Math.exp(-4 * dt));
@@ -376,6 +419,8 @@ export class Rogue {
     const speed = Math.hypot(this.velocity.x, this.velocity.z);
     if (speed > 0.4) {
       this.root.rotation.y = Math.atan2(this.velocity.x, this.velocity.z);
+    } else if (this.phase === "telegraph") {
+      this.root.rotation.y = Math.atan2(this.attackDirection.x, this.attackDirection.z);
     } else if (distance > 0.5) {
       this.root.rotation.y = Math.atan2(direction.x, direction.z);
     }
@@ -387,11 +432,13 @@ export class Rogue {
       this.aura.scaling.setAll(0.4 + pulse * 1.4);
       this.auraMaterial.alpha = 0.25 + pulse * 0.55;
     }
+    this.updateWarnings();
+    out.vulnerable = this.vulnerable;
 
     return out;
   }
 
-  private approach(dt: number, direction: Vector3, distance: number): void {
+  private approach(dt: number, direction: Vector3, distance: number, playerPosition: Vector3): void {
     const def = this.definition;
     let desiredX = 0;
     let desiredZ = 0;
@@ -417,28 +464,48 @@ export class Rogue {
     this.velocity.x += (desiredX - this.velocity.x) * blend;
     this.velocity.z += (desiredZ - this.velocity.z) * blend;
 
-    const reach = def.archetype === "brawler" ? 12 : def.archetype === "speedster" ? 16 : 70;
+    const sweep = def.archetype === "speedster" && this.healthRatio <= 0.55 && this.attackSequence % 2 === 0;
+    const reach = sweep ? 40 : def.archetype === "brawler" ? 12 : def.archetype === "speedster" ? 16 : 70;
     if (distance < reach && this.phaseTimer <= 0) {
       this.phase = "telegraph";
       // Faster archetypes telegraph longer; that is the counterplay.
-      this.phaseTimer = def.archetype === "speedster" ? 0.75 : 0.6;
+      this.phaseTimer = sweep ? 0.9 : def.archetype === "speedster" ? 0.75 : 0.6;
+      this.attackKind = sweep ? "sweep" : def.archetype === "brawler" || def.archetype === "speedster" ? "lunge" : "blast";
+      this.attackSequence += 1;
+      this.attackDirection.copyFrom(direction);
+      this.attackOrigin.copyFrom(this.root.position);
+      this.landing.copyFrom(playerPosition);
+      this.sweepRadius = 0;
+      this.attackConnected = false;
+      this.velocity.setAll(0);
       this.outcome.telegraph = true;
     }
   }
 
   private strike(
     dt: number,
-    direction: Vector3,
-    distance: number,
     playerPosition: Vector3,
     out: RogueOutcome,
   ): void {
     const def = this.definition;
-    if (def.archetype === "brawler" || def.archetype === "speedster") {
+    if (this.attackKind === "sweep") {
+      const previousRadius = this.sweepRadius;
+      this.sweepRadius += dt * 100;
+      const distance = Math.hypot(playerPosition.x - this.attackOrigin.x, playerPosition.z - this.attackOrigin.z);
+      // Even a standing jump peaks at only ~1.5 m; its counter must not
+      // secretly require sprint speed or an air dash.
+      const nearGround = playerPosition.y - this.attackOrigin.y < 0.9 && playerPosition.y >= this.attackOrigin.y - 1;
+      if (!this.attackConnected && nearGround && distance >= previousRadius - 2 && distance <= this.sweepRadius + 2) {
+        out.damage = def.damage;
+        this.attackConnected = true;
+      }
+    } else if (this.attackKind === "lunge") {
       const lunge = def.archetype === "speedster" ? def.speed * 0.7 : def.speed * 2.2;
-      this.velocity.x = direction.x * lunge;
-      this.velocity.z = direction.z * lunge;
-      if (distance < 4.2) {
+      this.velocity.x = this.attackDirection.x * lunge;
+      this.velocity.z = this.attackDirection.z * lunge;
+      const hitDistance = distanceToLungeSquared(playerPosition.x, playerPosition.z, this.root.position.x, this.root.position.z,
+        this.root.position.x + this.velocity.x * dt, this.root.position.z + this.velocity.z * dt);
+      if (hitDistance < 4.2 * 4.2 && Math.abs(playerPosition.y - this.root.position.y) < 3) {
         out.damage = def.damage;
         this.phase = "recover";
         this.phaseTimer = def.archetype === "speedster" ? 1.1 : 1.5;
@@ -459,6 +526,35 @@ export class Rogue {
     if (this.phaseTimer <= 0) {
       this.phase = "recover";
       this.phaseTimer = def.archetype === "artillery" ? 1.9 : 1.4;
+    }
+  }
+
+  private updateWarnings(): void {
+    const warning = this.phase === "telegraph";
+    this.attackWarning.setEnabled(warning && this.attackKind === "lunge");
+    if (warning && this.attackKind === "lunge") {
+      const length = this.definition.archetype === "speedster" ? this.definition.speed * 0.7 * 0.2 : this.definition.speed * 2.2 * 0.45;
+      this.attackWarning.position.set(this.attackOrigin.x + this.attackDirection.x * length * 0.5, this.attackOrigin.y + 0.13,
+        this.attackOrigin.z + this.attackDirection.z * length * 0.5);
+      this.attackWarning.rotation.y = Math.atan2(this.attackDirection.x, this.attackDirection.z);
+      this.attackWarning.scaling.z = length;
+    }
+    const showRing = this.attackKind !== "lunge" && (warning || this.phase === "strike");
+    this.sweepRing.setEnabled(showRing);
+    if (showRing) {
+      this.sweepRing.position.copyFrom(this.attackKind === "blast" ? this.landing : this.attackOrigin);
+      this.sweepRing.position.y += 0.15;
+      const radius = this.attackKind === "blast" ? BLAST_RADIUS : warning ? 40 : Math.max(0.5, this.sweepRadius);
+      this.sweepRing.scaling.set(radius, 1, radius);
+    }
+    for (let index = 0; index < this.fieldRings.length; index += 1) {
+      const ring = this.fieldRings[index]!;
+      const field = this.fields[index];
+      ring.setEnabled(Boolean(field));
+      if (field) {
+        ring.position.copyFrom(field.position);
+        ring.position.y += 0.12;
+      }
     }
   }
 
@@ -495,24 +591,33 @@ export class Rogue {
   hit(damage: number, impulseX: number, impulseZ: number): boolean {
     if (!this.alive) return false;
     if (!this.vulnerable) return false;
+    this.hitCooldown = 0.16;
 
     this.health -= damage;
     this.velocity.x += impulseX;
     this.velocity.z += impulseZ;
     this.phase = "stagger";
     this.phaseTimer = 0.42;
+    this.blastPending = false;
+    this.attackWarning.setEnabled(false);
+    this.sweepRing.setEnabled(false);
 
     if (this.health <= 0) {
       this.health = 0;
       this.alive = false;
       this.phase = "down";
       this.root.setEnabled(false);
+      for (const ring of this.fieldRings) ring.setEnabled(false);
+      this.fields.length = 0;
       return true;
     }
     return false;
   }
 
   dispose(): void {
+    this.attackWarning.dispose();
+    this.sweepRing.dispose();
+    for (const ring of this.fieldRings) ring.dispose();
     this.root.dispose(false, true);
     this.shadowCaster.dispose();
   }

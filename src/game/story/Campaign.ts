@@ -42,6 +42,8 @@ interface InlineState {
 }
 
 export class Campaign {
+  /** Per-run copy: branch expansion must never mutate the shared script. */
+  private readonly beats: Objective[];
   private beatIndex = -1;
   private activity: Activity | null = null;
   private inline: InlineState = { points: [], visited: [], hold: 0, baseY: 0, timer: 0 };
@@ -57,7 +59,10 @@ export class Campaign {
     readonly chapter: Chapter,
     private readonly world: ActivityWorld,
     private readonly dialogue: DialogueView,
-  ) {}
+    private readonly choices: Readonly<Record<string, string>> = {},
+  ) {
+    this.beats = [...chapter.beats];
+  }
 
   /** The chapter's chosen ending, once one has been made. */
   get choice(): string | null {
@@ -69,7 +74,7 @@ export class Campaign {
   }
 
   get beatCount(): number {
-    return this.chapter.beats.length;
+    return this.beats.length;
   }
 
   start(): void {
@@ -95,10 +100,10 @@ export class Campaign {
         this.dialogue.hide();
         this.advanceBeat();
       }
-      return this.beatIndex >= this.chapter.beats.length ? "complete" : "running";
+      return this.beatIndex >= this.beats.length ? "complete" : "running";
     }
 
-    const beat = this.chapter.beats[this.beatIndex];
+    const beat = this.beats[this.beatIndex];
     if (!beat) return "complete";
 
     const result = this.activity ? this.updateActivity(dt) : this.updateInline(dt, beat);
@@ -108,13 +113,21 @@ export class Campaign {
     }
     if (result === "complete") {
       this.advanceBeat();
-      return this.beatIndex >= this.chapter.beats.length ? "complete" : "running";
+      return this.beatIndex >= this.beats.length ? "complete" : "running";
     }
     return "running";
   }
 
   status(): ActivityStatus {
-    if (this.activity) return this.activity.status();
+    if (this.activity) {
+      const status = this.activity.status();
+      // RouteRun measures elapsed time; a campaign deadline is a separate
+      // countdown and must remain visible while the activity owns the HUD.
+      if (this.inline.timer > 0) {
+        return { ...status, detail: `${Math.ceil(this.inline.timer)}s left · ${status.detail}`, timer: this.inline.timer };
+      }
+      return status;
+    }
     return {
       title: this.title || this.chapter.title,
       detail: this.detail,
@@ -153,7 +166,17 @@ export class Campaign {
     this.surviveRogueId = null;
     this.beatIndex += 1;
 
-    const beat = this.chapter.beats[this.beatIndex];
+    let beat = this.beats[this.beatIndex];
+    while (beat?.kind === "branch") {
+      const choice = beat.chapter ? this.choices[beat.chapter] : this.choiceId;
+      // Persisted choices can be edited or come from a different script
+      // version. Never treat inherited keys ("constructor") as branches.
+      const selected = choice && Object.hasOwn(beat.outcomes, choice)
+        ? beat.outcomes[choice]!
+        : beat.fallback;
+      this.beats.splice(this.beatIndex, 1, ...selected);
+      beat = this.beats[this.beatIndex];
+    }
     if (!beat) return;
     this.begin(beat);
   }
@@ -213,21 +236,32 @@ export class Campaign {
       case "route": {
         const centre = this.resolve(beat.anchor);
         const gates: RouteGate[] = [];
-        // Gates ring the anchor so the route always comes back to where it started.
-        for (let i = 0; i < beat.gates; i += 1) {
-          const angle = (i / beat.gates) * Math.PI * 2 + world.rng() * 0.4;
-          const radius = beat.spread * (0.55 + world.rng() * 0.45);
-          const point = world.city.nearestRoad(
-            new Vector3(centre.x + Math.cos(angle) * radius, 0, centre.z + Math.sin(angle) * radius),
-          );
-          gates.push({
-            position: point,
-            minSpeed: beat.minKph === undefined ? undefined : beat.minKph / 3.6,
-            radius: 22,
-          });
+        if (beat.stops?.length) {
+          for (const stop of beat.stops) {
+            gates.push({
+              position: world.city.nearestRoad(this.resolve(stop)),
+              minSpeed: beat.minKph === undefined ? undefined : beat.minKph / 3.6,
+              radius: 26,
+            });
+          }
+        } else {
+          // Retain generated ring routes for future/local story challenges.
+          for (let i = 0; i < beat.gates; i += 1) {
+            const angle = (i / beat.gates) * Math.PI * 2 + world.rng() * 0.4;
+            const radius = beat.spread * (0.55 + world.rng() * 0.45);
+            const point = world.city.nearestRoad(
+              new Vector3(centre.x + Math.cos(angle) * radius, 0, centre.z + Math.sin(angle) * radius),
+            );
+            gates.push({
+              position: point,
+              minSpeed: beat.minKph === undefined ? undefined : beat.minKph / 3.6,
+              radius: 22,
+            });
+          }
         }
         const run = new RouteRun({
           id: `story-${this.chapter.id}-${this.beatIndex}`,
+          recordBest: false,
           name: beat.title,
           summary: beat.detail,
           gates,
