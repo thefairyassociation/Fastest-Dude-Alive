@@ -139,6 +139,23 @@ for (const decision of ['restore-public-grid', 'disconnect-grid', null]) {
   });
 }
 
+test('dying during a story rescue fails the chapter instead of leaving the clock running', () => {
+  const { world, dialogue } = worldAndDialogue();
+  const campaign = new Campaign(CHAPTERS[0], world, dialogue, {});
+  campaign.start();
+  let ticks = 0;
+  while (ticks++ < 50 && !campaign.status().title.includes('Clear the bridge')) {
+    const marker = campaign.markers()[0];
+    if (marker && !dialogue.active) world.player.position.copyFrom(marker.position);
+    if (world.player.speedKph < 200) world.player.speedKph = 200;
+    campaign.update(1, input);
+  }
+  assert.match(campaign.status().title, /Clear the bridge/);
+  world.player.health = 0;
+  assert.equal(campaign.update(1, input), 'failed');
+  campaign.stop();
+});
+
 test('unknown or inherited choice names use the legacy fallback without crashing', () => {
   for (const decision of ['unrecognized-ending', 'constructor', '__proto__']) {
     const { world, dialogue } = worldAndDialogue();

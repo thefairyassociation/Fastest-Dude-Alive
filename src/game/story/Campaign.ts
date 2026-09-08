@@ -103,6 +103,11 @@ export class Campaign {
       return this.beatIndex >= this.beats.length ? "complete" : "running";
     }
 
+    if (this.world.player.health <= 0) {
+      this.failed = true;
+      return "failed";
+    }
+
     const beat = this.beats[this.beatIndex];
     if (!beat) return "complete";
 

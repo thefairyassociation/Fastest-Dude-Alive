@@ -46,15 +46,15 @@ interface Atmosphere {
 
 const ATMOSPHERES: Record<AtmosphereId, Atmosphere> = {
   golden: {
-    sun: new Vector3(-0.56, -0.43, 0.5).normalize(),
+    sun: new Vector3(-0.46, -0.78, 0.38).normalize(),
     sunColor: new Color3(1, 0.83, 0.64),
     sunIntensity: 2.7,
-    skyColor: new Color3(0.58, 0.73, 0.86),
-    groundColor: new Color3(0.38, 0.39, 0.37),
-    ambientIntensity: 0.7,
+    skyColor: new Color3(0.72, 0.83, 0.95),
+    groundColor: new Color3(0.53, 0.53, 0.49),
+    ambientIntensity: 1.3,
     fogColor: new Color3(0.64, 0.75, 0.81),
     fogDensity: 0.00020,
-    exposure: 1.02,
+    exposure: 1.17,
     cloudAlpha: 0.62,
     cloudTint: new Color3(1, 0.96, 0.9),
     sunGlow: 1,

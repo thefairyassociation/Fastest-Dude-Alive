@@ -67,8 +67,8 @@ export class Palette {
     this.flat("concrete", "#aaa99f", 0.88, 0.02);
     this.flat("concrete-dark", "#6d6b66", 0.9, 0.02);
     this.flat("trunk", "#4c3a2c", 0.94, 0);
-    this.flat("leaf", "#44582f", 0.96, 0);
-    this.flat("leaf-autumn", "#7d6a2e", 0.96, 0);
+    this.flat("leaf", "#668d43", 0.96, 0);
+    this.flat("leaf-autumn", "#bd813b", 0.96, 0);
     this.flat("steel", "#3a3d40", 0.4, 0.8);
     this.flat("steel-bright", "#8f979d", 0.3, 0.85);
     this.flat("rubber", "#141517", 0.95, 0);
@@ -143,7 +143,7 @@ export class Palette {
   private surface(key: string, maps: SurfaceMaps, roughness: number, metallic: number): PBRMaterial {
     const material = new PBRMaterial(key, this.scene);
     material.albedoTexture = maps.albedo;
-    maps.normal.level = 0.85;
+    maps.normal.level = key.startsWith("facade:") ? 0.32 : 0.65;
     material.bumpTexture = maps.normal;
     material.roughness = roughness;
     material.metallic = metallic;
