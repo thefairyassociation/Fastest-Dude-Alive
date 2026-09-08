@@ -1,5 +1,5 @@
 import { Color3, PBRMaterial, Scene, Texture } from "@babylonjs/core";
-import type { Rng } from "../core/Rng";
+import { mulberry32, type Rng } from "../core/Rng";
 import {
   FACADE_STYLES,
   createFacadeMaps,
@@ -64,7 +64,7 @@ export class Palette {
     this.flat("harbor-blue", "#3c758a", 0.62, 0.3);
     this.flat("leaf-sage", "#637e51", 0.98, 0);
     this.emissive("warm-light", "#efbb7d", 0.85);
-    this.flat("concrete", "#aaa99f", 0.88, 0.02);
+    this.surface("concrete", createSidewalkMaps(scene, mulberry32(0xc0c0)), 0.88, 0.02);
     this.flat("concrete-dark", "#6d6b66", 0.9, 0.02);
     this.flat("trunk", "#4c3a2c", 0.94, 0);
     this.flat("leaf", "#668d43", 0.96, 0);

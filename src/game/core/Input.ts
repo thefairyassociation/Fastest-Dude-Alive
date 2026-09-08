@@ -24,7 +24,8 @@ export type Action =
   | "advance"
   | "pause"
   | "map"
-  | "recenter";
+  | "recenter"
+  | "retry";
 
 const DEFAULT_BINDINGS: Record<Action, string[]> = {
   forward: ["KeyW", "ArrowUp"],
@@ -45,6 +46,7 @@ const DEFAULT_BINDINGS: Record<Action, string[]> = {
   pause: ["Escape"],
   map: ["KeyM"],
   recenter: ["KeyV"],
+  retry: ["Enter"],
 };
 
 /** Codes we swallow so the page never scrolls or scrubs under the game. */

@@ -1,3 +1,4 @@
+import { buildPlaygroundArt } from "./Playgrounds";
 import { Mesh, MeshBuilder, Scene, Vector3, Vector4 } from "@babylonjs/core";
 import { clamp, mulberry32, pick, type Rng } from "../core/Rng";
 import type { Quality } from "../core/Save";
@@ -589,6 +590,7 @@ export class City {
 
     buildRiverfront(this.buildContext(), this.extent, BRIDGE_ROWS);
     buildHorizon(this.buildContext(), this.extent);
+    buildPlaygroundArt(this.buildContext(), this);
     this.flushBoxes();
     this.mergeChunks();
     this.updateStreaming(this.start);
@@ -769,7 +771,7 @@ export class City {
     // Parapet lip: gives the roof an edge to mantle onto and reads at range.
     const parapet = MeshBuilder.CreateBox(
       `parapet-${gx}-${gz}-${x}-${z}`,
-      { width: width + 1.2, depth: depth + 1.2, height: 1.1, faceUV: plainUv() },
+      { width: width + 1.2, depth: depth + 1.2, height: 1.1, faceUV: Array.from({ length: 6 }, () => new Vector4(0, 0, width / 8, depth / 8)) },
       this.scene,
     );
     parapet.position.set(x, height + KERB_Y + 0.55, z);
@@ -786,7 +788,7 @@ export class City {
       );
       penthouse.position.set(
         x + (rng() - 0.5) * width * 0.3,
-        height + KERB_Y + boxH * 0.5,
+        height + KERB_Y + 1.1 + boxH * 0.5,
         z + (rng() - 0.5) * depth * 0.3,
       );
       this.addMesh("concrete", penthouse, false);
@@ -798,7 +800,7 @@ export class City {
         { height: 10 + rng() * 12, diameterTop: 0.18, diameterBottom: 0.5, tessellation: 6 },
         this.scene,
       );
-      mast.position.set(x, height + KERB_Y + 6, z);
+      mast.position.set(x, height + KERB_Y + 1.1 + mast.getBoundingInfo().boundingBox.extendSize.y, z);
       this.addMesh("steel", mast, true);
     }
 
@@ -816,27 +818,26 @@ export class City {
   /** Layered architecture inside the existing footprints and roof heights. */
   private dressTower(x: number, z: number, w: number, d: number, h: number, style: string): void {
     const glass = style === "glass-tower" || style === "panel-dark";
-    const art = this.artRng;
     const box = (key: string, dx: number, y: number, dz: number, width: number, height: number, depth: number, detail = false): void => {
       this.queueBox(key, x + dx, KERB_Y + y, z + dz, width, height, depth, detail);
     };
-    const trim = glass ? (art() < 0.45 ? "copper" : "steel-bright") : "warm-stone";
+    const trim = glass ? "steel" : "warm-stone";
     // Two facade languages: curtain-wall fins and masonry cornices. Slender
     // visual relief keeps the existing collision envelope and routes stable.
     if (glass) {
-      for (const offset of [-0.42, 0, 0.42]) {
+      for (const offset of [-0.42, 0.42]) {
         for (const side of [-1, 1]) {
           box(trim, offset * w, h / 2, side * d / 2, 0.48, h, 0.38);
           box(trim, side * w / 2, h / 2, offset * d, 0.38, h, 0.48);
         }
       }
-      const bandY = h * (0.6 + art() * 0.18);
+      const bandY = Math.floor(h / 3.6 * 0.66) * 3.6;
       box("steel", 0, bandY, 0, w + 0.3, 1.2, d + 0.3);
       box(style === "glass-tower" ? "cyan-light" : "warm-light", 0, h - 0.4, -d / 2 - 0.12, w * 0.92, 0.18, 0.1);
       // Contrasting opaque spandrels make the crown read as a designed tier.
-      for (const side of [-1, 1]) box(trim, side * (w / 2 - 1.4), h - 3, 0, 2.8, 6, d + 0.16);
+      box("steel", 0, h - 0.6, 0, w + 0.16, 1.2, d + 0.16);
     } else {
-      for (let y = 5; y < h; y += 12) box(trim, 0, y, 0, w + 0.4, 0.42, d + 0.4);
+      for (let y = 7.2; y < h; y += 21.6) box(trim, 0, y, 0, w + 0.4, 0.42, d + 0.4);
       for (const side of [-1, 1]) {
         box(trim, side * (w / 2 - 0.4), h / 2, -d / 2, 0.85, h, 0.4);
         box(trim, side * (w / 2 - 0.4), h / 2, d / 2, 0.85, h, 0.4);

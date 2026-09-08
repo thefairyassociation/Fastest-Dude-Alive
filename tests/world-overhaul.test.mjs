@@ -5,6 +5,8 @@ import { createCanvas, Image } from '@napi-rs/canvas';
 import { NullEngine, Scene, FreeCamera, Vector3, VertexBuffer, InternalTexture, InternalTextureSource } from '@babylonjs/core';
 import { City, GRID_RADIUS, BLOCK_PITCH, BRIDGE_ROWS, districtAt } from '../src/game/world/City.ts';
 import { Collectibles } from '../src/game/activities/Collectibles.ts';
+import { buildPlaygroundRoutes } from '../src/game/world/Playgrounds.ts';
+import { Player } from '../src/game/player/Player.ts';
 import { buildRoutes } from '../src/game/activities/routes.ts';
 import { mulberry32 } from '../src/game/core/Rng.ts';
 import { StaticBoxBatch } from '../src/game/world/StaticGeometry.ts';
@@ -96,7 +98,14 @@ test('expanded city preserves saved mote locations and has valid routes, new roo
     }
     const routes=buildRoutes(city);
     assert.equal(routes.length,9);
-    for(const route of routes) for(const [i,gate] of route.gates.entries()) {
+    const playgrounds = buildPlaygroundRoutes(city);
+    assert.equal(playgrounds.length, 3);
+    assert.deepEqual(playgrounds.map(p => p.id), ['crest-circuit', 'river-rush', 'foundry-flow']);
+    assert.ok(playgrounds.every(p => p.gates.length >= 16 && p.par >= 45));
+    const bridgeY = city.groundHeight(300,328,400);
+    assert.ok(bridgeY > 20);
+    assert.equal(city.grid.overlaps(300,328,.42,bridgeY,bridgeY+1.8,.55),false);
+    for(const route of [...routes, ...playgrounds]) for(const [i,gate] of route.gates.entries()) {
       const p=gate.position;
       assert.ok(p.asArray().every(Number.isFinite),`${route.id}/${i}`);
       assert.ok(Math.max(Math.abs(p.x),Math.abs(p.z))<city.extent,`${route.id}/${i} inside map`);
@@ -104,6 +113,35 @@ test('expanded city preserves saved mote locations and has valid routes, new roo
       if(city.isWater(p.x,p.z) && p.y<1) assert.ok(gate.minSpeed>=34,`${route.id}/${i} water pace gate`);
     }
 
+    const runner = new Player(scene, city.start.clone());
+    const input = { movement: () => ({x:0,z:1}), down: a => a === 'sprint', consume: () => false };
+    const timings = [];
+    for (const dt of [1/120, 1/20]) {
+      runner.teleport(city.start);
+      const begin = performance.now();
+      for (let i=0;i<8/dt;i++) {
+        runner.update(dt,input,0,city);
+        assert.ok(runner.position.asArray().every(Number.isFinite));
+        assert.equal(city.grid.overlaps(runner.position.x,runner.position.z,.40,runner.position.y,runner.position.y+1.8,.55),false,'sprint stays outside buildings');
+      }
+      timings.push(Math.round(performance.now()-begin));
+      assert.ok(runner.speed > 190);
+    }
+    console.log(`8s full-city sprint simulation at 120Hz / 20Hz: ${timings.join(' / ')}ms CPU`);
+    runner.teleport(new Vector3(272,.42,280));
+    runner.velocity.z = 215;
+    let wallSteps=0, crests=0;
+    for(let i=0;i<480;i++) {
+      const events = runner.update(1/120,input,0,city);
+      if(runner.state==='vertical') wallSteps++;
+      if(events.roofCrested) { crests++; assert.ok(runner.speed>100,'actual roof preserves momentum'); break; }
+    }
+    assert.ok(wallSteps>0 && crests===1,'Crest approach supports a continuous climb and roof exit');
+    runner.teleport(new Vector3(1050,.1,300)); runner.velocity.z=150;
+    let spray=0;
+    for(let i=0;i<120;i++) { const events=runner.update(1/120,input,0,city); spray+=Number(events.waterSpray); assert.equal(events.sank,false); }
+    assert.ok(spray>100,'water running remains continuous');
+    runner.root.dispose(false,true);
     const full=scene.meshes.filter(m=>m.name.startsWith('facade:')&&m.name.endsWith('-merged'));
     const skyline=scene.meshes.filter(m=>m.name==='skyline-merged');
     city.updateStreaming(city.start);

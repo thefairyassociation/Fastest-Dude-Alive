@@ -45,8 +45,8 @@ interface MarkerNode {
 }
 
 /** Below this the light column is hidden — you are already standing in it. */
-const COLUMN_NEAR = 34;
-const COLUMN_FAR = 140;
+const COLUMN_NEAR = 65;
+const COLUMN_FAR = 240;
 
 export class Markers {
   private readonly pool: MarkerNode[] = [];
@@ -62,7 +62,7 @@ export class Markers {
     for (const [style, hex] of Object.entries(STYLE_COLORS) as Array<[MarkerStyle, string]>) {
       const material = new PBRMaterial(`marker-${style}`, scene);
       material.albedoColor = Color3.Black();
-      material.emissiveColor = Color3.FromHexString(hex).scale(2.4);
+      material.emissiveColor = Color3.FromHexString(hex).scale(1.4);
       material.roughness = 1;
       material.metallic = 0;
       material.alpha = 0.7;
@@ -136,7 +136,7 @@ export class Markers {
       if (node.column.isEnabled() === near) node.column.setEnabled(!near);
       if (!near) {
         const t = Math.min(1, (distance - COLUMN_NEAR) / (COLUMN_FAR - COLUMN_NEAR));
-        node.column.visibility = 0.1 + t * 0.5;
+        node.column.visibility = t * 0.28;
       }
     }
   }
@@ -162,11 +162,11 @@ export class Markers {
     // A wide, soft beam so the marker is findable from street level.
     const column = MeshBuilder.CreatePlane(
       `marker-beam-${index}`,
-      { width: 14, height: 70 },
+      { width: 5, height: 44 },
       this.scene,
     );
     column.billboardMode = Mesh.BILLBOARDMODE_Y;
-    column.position.y = 34;
+    column.position.y = 22;
     column.parent = root;
     column.material = this.columnMaterials.get("objective") ?? null;
     column.isPickable = false;

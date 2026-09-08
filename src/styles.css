@@ -490,3 +490,9 @@ kbd { font: inherit; }
 @media (min-width: 601px) and (max-width: 1100px) {
   .capture-hint { bottom: 122px; }
 }
+
+/* Keep the street ahead readable; flow only appears while a chain is live. */
+.flow-panel { top: 170px; width: 220px; padding: 9px 12px; background: #10232bb3; }
+.flow-panel strong { font-size: 20px; }
+#flow-detail { margin-top: 5px; }
+@media (max-width: 700px) { .flow-panel { top: 156px; width: 180px; left: 12px; } }

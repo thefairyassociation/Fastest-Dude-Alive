@@ -3,7 +3,7 @@ import { approach, clamp, damp } from "../core/Rng";
 import type { Input } from "../core/Input";
 import type { City, MoveResult } from "../world/City";
 import { HeroModel } from "./HeroModel";
-import { COYOTE_SECONDS, JUMP_BUFFER_SECONDS, timeToLanding, turnHeading } from "./Traversal";
+import { COYOTE_SECONDS, JUMP_BUFFER_SECONDS, timeToLanding, turnHeading, HANDLING, cleanDrift } from "./Traversal";
 
 /**
  * The speed controller.
@@ -15,13 +15,13 @@ import { COYOTE_SECONDS, JUMP_BUFFER_SECONDS, timeToLanding, turnHeading } from 
  */
 
 /** Metres per second. 45 is already superhuman; sprint is the real fantasy. */
-const RUN_TOP = 45;
-const SPRINT_TOP = 215;
-const ABSOLUTE_TOP = 280;
-const RUN_ACCEL = 62;
-const SPRINT_ACCEL = 58;
-const BRAKE = 46;
-const COUNTERSTEER_BRAKE = 145;
+const RUN_TOP = HANDLING.runTop;
+const SPRINT_TOP = HANDLING.sprintTop;
+const ABSOLUTE_TOP = HANDLING.absoluteTop;
+const RUN_ACCEL = HANDLING.runAcceleration;
+const SPRINT_ACCEL = HANDLING.sprintAcceleration;
+const BRAKE = HANDLING.brake;
+const COUNTERSTEER_BRAKE = HANDLING.countersteerBrake;
 
 const GRAVITY = 24;
 const WALL_GRAVITY = 5.5;
@@ -47,6 +47,9 @@ export interface PlayerEvents {
   waterSpray: boolean;
   sank: boolean;
   struck: boolean;
+  driftExited: boolean;
+  roofCrested: boolean;
+  cleanLanded: boolean;
 }
 
 export class Player {
@@ -75,6 +78,7 @@ export class Player {
   focusHeld = false;
   /** True while opposite steering is actively scrubbing forward speed. */
   braking = false;
+  private previousSpeed = 0;
 
   private readonly move: MoveResult = {
     grounded: true,
@@ -94,6 +98,9 @@ export class Player {
     waterSpray: false,
     sank: false,
     struck: false,
+    driftExited: false,
+    roofCrested: false,
+    cleanLanded: false,
   };
 
   private readonly wallNormal = new Vector3();
@@ -111,9 +118,13 @@ export class Player {
   private wallCooldown = 0;
   private climbSpeed = 0;
   private slideTimer = 0;
+  private driftAngle = 0;
+  private driftBlocked = false;
+  private wallEntrySpeed = 0;
+  private wallSeamGrace = 0;
   private sinkTimer = 0;
   private secondsSinceDamage = 99;
-  private strideClock = 0;
+  private footPlantIndex = 0;
   private lastTurn = 0;
   private previousYaw = 0;
 
@@ -138,6 +149,13 @@ export class Player {
 
   get speedRatio(): number {
     return Math.min(1, this.speed / SPRINT_TOP);
+  }
+
+  get flowStyle(): string {
+    if (this.events.waterSpray) return "water";
+    if (this.events.driftExited) return "drift-exit";
+    if (this.events.roofCrested) return "roof-link";
+    return this.state;
   }
 
   get topSpeed(): number {
@@ -246,14 +264,22 @@ export class Player {
     let speed = this.speed;
 
     if (sliding) {
-      // Lower friction preserves speed, while deliberate steering shapes a drift.
       this.slideTimer += dt;
-      speed = approach(speed, 0, 14 * dt);
+      speed = approach(speed, 0, HANDLING.driftDrag * dt);
+      const before = Math.atan2(this.velocity.x, this.velocity.z);
+      if (hasInput) this.steer(desired, speed, dt, HANDLING.driftAuthority);
+      const after = Math.atan2(this.velocity.x, this.velocity.z);
+      this.driftAngle += Math.abs(Math.atan2(Math.sin(after - before), Math.cos(after - before)));
       if (!wantsSlide || speed < 9 || this.slideTimer > 3.2) {
+        if (!wantsSlide && !this.driftBlocked && cleanDrift(this.slideTimer, this.driftAngle, speed)) {
+          speed = Math.min(ABSOLUTE_TOP, speed + HANDLING.driftReward);
+          this.events.driftExited = true;
+          this.charge = Math.min(100, this.charge + 6);
+        }
         this.state = "ground";
         this.slideTimer = 0;
+        this.driftAngle = 0;
       }
-      if (hasInput) this.steer(desired, speed, dt, 0.55);
     } else {
       if (hasInput) {
         const target = (sprinting ? SPRINT_TOP : RUN_TOP) * inputStrength;
@@ -263,7 +289,7 @@ export class Player {
         // never turn through exactly 180°, leaving S accelerating forwards.
         this.braking = alignment < -0.35 && speed > 12;
         speed = approach(speed, this.braking ? 0 : target, (this.braking ? COUNTERSTEER_BRAKE : accel) * dt);
-        this.steer(desired, speed, dt, this.braking ? 0.38 : 1);
+        this.steer(desired, speed, dt, this.braking ? 1.2 : 1);
       } else {
         speed = approach(speed, 0, BRAKE * dt);
       }
@@ -273,8 +299,8 @@ export class Player {
         this.slideTimer = 0;
         this.slideReady = false;
         this.slideCooldown = 0.9;
-        // A slide entered at pace pays for itself once.
-        speed = Math.min(ABSOLUTE_TOP, speed * 1.08);
+        this.driftAngle = 0;
+        this.driftBlocked = false;
       }
     }
 
@@ -308,7 +334,7 @@ export class Player {
     }
 
     // Air control: real but reduced, so a jump commits without feeling stiff.
-    if (hasInput) this.steer(desired, this.speed, dt, 0.42);
+    if (hasInput) this.steer(desired, this.speed, dt, 0.7);
 
     this.velocity.y = Math.max(-TERMINAL, this.velocity.y - GRAVITY * dt);
 
@@ -321,11 +347,12 @@ export class Player {
     this.wallTimer -= dt;
 
     const normal = city.probeWall(this.root.position, this.radius, this.height, 0.55);
-    if (!normal || this.wallTimer <= 0 || this.speed < 14) {
+    this.wallSeamGrace = normal ? 0.10 : this.wallSeamGrace - dt;
+    if (this.wallSeamGrace <= 0 || this.wallTimer <= 0 || this.speed < 14) {
       this.detachWall(0);
       return;
     }
-    this.wallNormal.copyFrom(normal);
+    if (normal) this.wallNormal.copyFrom(normal);
 
     if (wantsJump) {
       // Kick off the wall: outward, upward, and keeping the carried speed.
@@ -348,7 +375,7 @@ export class Player {
     this.velocity.z -= this.wallNormal.z * 3;
 
     this.velocity.y = Math.max(-24, this.velocity.y - WALL_GRAVITY * dt);
-    this.setHorizontalSpeed(approach(this.speed, 0, 7 * dt));
+    this.setHorizontalSpeed(approach(this.speed, 0, 3 * dt));
 
     const right = this.heading.z * -this.wallNormal.x - this.heading.x * -this.wallNormal.z;
     this.wallSide = right > 0 ? 1 : -1;
@@ -358,12 +385,15 @@ export class Player {
     const normal = city.probeWall(this.root.position, this.radius, this.height, 0.7);
 
     if (!normal) {
-      // Crested the parapet: carry over the edge onto the roof.
-      this.root.position.addInPlace(this.wallNormal.scale(-(this.radius + 0.8)));
-      this.velocity.set(-this.wallNormal.x * 14, 6, -this.wallNormal.z * 14);
+      // Sweep over the lip; never teleport through a neighboring facade.
+      const carry = Math.max(45, this.wallEntrySpeed * HANDLING.roofCarry);
+      const exit = this.scratch.set(-this.wallNormal.x * 1.3, 0, -this.wallNormal.z * 1.3);
+      city.move(this.root.position, exit, this.radius, this.height, STEP_HEIGHT, this.move);
+      this.velocity.set(-this.wallNormal.x * carry, 6, -this.wallNormal.z * carry);
       this.state = "air";
       this.wallCooldown = 0.4;
       this.airDashAvailable = true;
+      this.events.roofCrested = true;
       return;
     }
     this.wallNormal.copyFrom(normal);
@@ -390,8 +420,8 @@ export class Player {
 
   private steer(desired: Vector3, speed: number, dt: number, authority: number): void {
     const normalized = Math.min(1, speed / SPRINT_TOP);
-    // Turning gets heavier the faster you go; that is the whole handling model.
-    const turnRate = (10.5 - normalized * 7.6) * authority;
+    // Speed retains weight while streets remain steerable. Focus sharpens control.
+    const turnRate = (HANDLING.turnSlow + normalized * (HANDLING.turnFast - HANDLING.turnSlow)) * authority * (this.focusHeld ? HANDLING.focusAuthority : 1);
     const currentSpeed = this.speed;
     const target = Math.atan2(desired.x, desired.z);
     const current = currentSpeed > 0.1 ? Math.atan2(this.velocity.x, this.velocity.z) : target;
@@ -465,7 +495,8 @@ export class Player {
     }
     if (into < -0.12) {
       this.state = "wall";
-      this.wallTimer = 2.6;
+      this.wallTimer = 4;
+      this.wallSeamGrace = 0.1;
       this.velocity.y = Math.max(this.velocity.y, 2.5);
       this.airDashAvailable = true;
     }
@@ -484,6 +515,7 @@ export class Player {
 
   private beginVerticalRun(speed: number): void {
     this.state = "vertical";
+    this.wallEntrySpeed = speed;
     // Horizontal momentum becomes altitude, at a loss.
     this.climbSpeed = Math.min(130, speed * 0.82);
     this.velocity.y = this.climbSpeed;
@@ -524,6 +556,7 @@ export class Player {
     const delta = this.scratch.set(this.velocity.x * dt, 0, this.velocity.z * dt);
     city.move(this.root.position, delta, this.radius, this.height, STEP_HEIGHT, this.move);
 
+    if (this.move.hitWall && this.state === "slide") this.driftBlocked = true;
     const ground = this.move.groundY;
     if (this.root.position.y <= ground + 0.02) {
       this.root.position.y = ground;
@@ -533,6 +566,7 @@ export class Player {
         this.airDashAvailable = true;
         this.wallSide = 0;
         this.events.landed = falling;
+        this.events.cleanLanded = falling && this.speed > 60;
       }
     } else if (this.state === "ground" || this.state === "slide") {
       // Ran off an edge.
@@ -542,7 +576,8 @@ export class Player {
 
     // Head-on impact into a facade scrubs speed instead of stopping dead.
     if (this.move.hitWall && this.move.progress < 0.35 && this.state !== "wall" && this.state !== "vertical") {
-      this.setHorizontalSpeed(this.speed * 0.55);
+      // Attempt attachment on the collision step, before losing the entry speed.
+      if (!(this.speed > 48 && this.tryVerticalRun(city))) this.setHorizontalSpeed(this.speed * 0.55);
     }
 
     // Running the river: fast enough and you stay on the surface.
@@ -588,22 +623,22 @@ export class Player {
       speed,
       speedRatio: this.speedRatio,
       grounded: this.grounded,
+      braking: this.braking,
+      accelerating: speed - this.previousSpeed > dt * 40,
       wallSide: this.state === "wall" ? this.wallSide : 0,
       verticalRun: this.state === "vertical",
       sliding: this.state === "slide",
       strike: this.strikeTimer,
       turn: this.lastTurn,
     });
+    this.previousSpeed = speed;
     this.model.setCharge(this.speedRatio, this.focusHeld);
 
-    // Foot plants drive dust puffs and step audio.
-    if (this.grounded && speed > 2) {
-      this.strideClock += dt * Math.min(26, 3.2 + speed * 0.62);
-      if (this.strideClock > Math.PI) {
-        this.strideClock -= Math.PI;
-        this.events.footstep = true;
-      }
-    }
+    // Gait and sound share the same foot plants; drifting has no running steps.
+    const plant = this.model.footPlantIndex;
+    this.events.footstep = this.state === "ground" && speed > 2 && plant !== this.footPlantIndex;
+    this.footPlantIndex = plant;
+
   }
 
   /* ---------------- abilities and state ---------------- */
@@ -692,6 +727,9 @@ export class Player {
     this.coyote = 0;
     this.jumpBuffer = 0;
     this.slideTimer = 0;
+    this.driftAngle = 0;
+    this.wallEntrySpeed = 0;
+    this.wallSeamGrace = 0;
     this.slideReady = true;
     this.slideCooldown = 0;
     this.dashTimer = 0;
@@ -716,6 +754,9 @@ export class Player {
     e.waterSpray = false;
     e.sank = false;
     e.struck = false;
+    e.driftExited = false;
+    e.roofCrested = false;
+    e.cleanLanded = false;
   }
 
   private tickResources(dt: number): void {

@@ -4,6 +4,16 @@ An original, browser-first speedster game built with TypeScript and Babylon.js. 
 
 **Current build:** a 5.55 km-wide Meridian, ten districts, fifteen landmarks, independent free roam and a fifteen-chapter campaign, **Minutes Owed**. The recently rebuilt crimson speedster is retained; the overhaul concentrates on the world, presentation, responsiveness and things to do.
 
+## Speedster playgrounds
+
+The latest pass makes sprint reach 90% speed in 1.5 seconds, sharpens steering and Focus control, and carries momentum over roof crests. Hold Ctrl/C to carve a drift; a sustained clean corner earns an exit burst and energy when released. Footsteps follow the visible gait, with new acceleration and braking poses.
+
+Three new repeatable courses — **Crest Circuit**, **River Rush**, and **Foundry Flow** — connect street corners, rooftops, water crossings and optional shortcuts. They have gold/silver/bronze targets and personal-best ghosts. Free roam initially points toward Crest Circuit; **Enter** retries the active or last activity. Controller players can use Pause → Restart.
+
+Two opt-in emergencies add a reason to use those powers: **Cascade Rescue** lets you save four people in any order while Focus delays grid surges; **Courier Interception** sends Switchback around a committed foundry road loop, with jumpable sweeps and recovery windows. Calls become available within 650 m; nothing starts without T. Finishing a run offers another nearby destination.
+
+The city keeps its footprint and campaign, with simpler rooflines, street-level storefronts, quieter glass facades, tiled roof materials and smaller waypoint beams. Version-four saves preserve old times and archive old ghosts separately from the new handling records. See [implementation and playtest notes](docs/SPEEDSTER-PLAYGROUNDS.md).
+
 ## Play
 
 ```bash
@@ -51,14 +61,15 @@ The authored script, cast and campaign runner live in `src/game/story/`. See [st
 
 ## Movement and combat
 
-Momentum, heavy steering at speed, wall running, vertical running, water running, slide, air dash and focus remain the foundation.
+Responsive momentum steering, wall running, vertical running, water running, slide, air dash and focus remain the foundation.
 
 | Input | Action |
 | --- | --- |
 | WASD / left stick | Run and steer; analog stick deflection controls walking speed |
 | Shift | Sprint toward approximately 215 m/s / 775 km/h |
 | Space | Jump; in the air, phase dash; on a wall, kick away |
-| Ctrl / C | Slide while moving; release before starting another slide |
+| Ctrl / C | Hold to drift; release after a clean corner for an exit burst |
+| Enter | Retry the active or last free-roam activity |
 | Mouse / right stick / IJKL | Look (IJKL works without mouse capture) |
 | V | Recenter camera behind the runner |
 | Left click | Speed strike |
@@ -74,7 +85,7 @@ Jump buffering and a short coyote window make landing transitions more forgiving
 
 Attacks commit to the position shown by their warning, allowing a dodge. Charges follow a committed lane; Vantage alternates charges with jumpable expanding ground sweeps at low health. The HUD gives the current counterplay cue. Speed strikes and body checks retain their recovery windows.
 
-Gamepad: A jump, B slide, X strike, Y bolt, bumpers focus/pulse, left-stick click sprint, View activity, right-stick click toggles the map, Start pause / close map. Menus support controller and keyboard navigation.
+Gamepad: A jump, B drift, X strike, Y bolt, bumpers focus/pulse, left-stick click sprint, View activity, right-stick click toggles the map, Start pause / close map. Menus support controller and keyboard navigation.
 
 ## Presentation and accessibility
 
@@ -106,13 +117,22 @@ Tests exercise geometry and textures with a CPU canvas and Babylon NullEngine; f
 - Sound uses four persistent beds, at most twelve transient voices, rate-limited cues and a master limiter.
 - Replay ghosts use one merged mesh and bounded local storage; they have no collision or shadow cost.
 - Babylon WebGPU selection retains a WebGL fallback. Procedural art uses independent random streams so visual edits do not reshuffle gameplay.
-- Version-three profiles migrate existing progress, settings, motes and route times rather than resetting them.
+- Version-four profiles migrate existing progress, settings, motes and route times rather than resetting them.
 
 The performance target remains 60 fps at 1080p on a midrange desktop, with scalable settings for slower hardware. It is a target, not a measured result for this overhaul.
 
 ## Roadmap
 
-### Current focus: make the minute-to-minute game better
+### Current focus: speedster playgrounds
+
+- [x] Punchier sprint, responsive turns, sustained-corner drift rewards and momentum-preserving roof crests.
+- [x] Same-step Focus steering, gait-synced audio and acceleration/braking poses.
+- [x] Three new courses, two opt-in emergencies and quick retries.
+- [x] Cleaner facades, tiled roofs and smaller beacons within existing geometry budgets.
+- [x] Version-four save migration preserving earlier records and ghosts.
+- [ ] Complete GPU/browser appearance, sustained frame-time and physical-controller playtests for this pass.
+
+### Previous playability pass
 
 This local playability pass addresses camera response, readable ability feedback and finding a reason to run. It builds on the GitHub roadmap below; the larger systems are still future work.
 
@@ -124,7 +144,7 @@ This local playability pass addresses camera response, readable ability feedback
 - [x] Free-roam momentum chains with traversal multipliers and energy rewards.
 - [x] Brighter street canyons, storefront glazing/signage, softer facade normals, brighter foliage and clearer road paint.
 - [ ] Playtest camera at top speed with mouse and controller on target hardware; tune framing and sensitivity from player feedback.
-- [ ] Add authored short traversal playgrounds with ramps, rooftop links and optional shortcuts; preserve old route records.
+- [x] Add three authored traversal playgrounds with rooftop links, stepped cargo shortcuts, medals and separate handling records.
 - [ ] Add road-aware route planning, zoom/pan and controller destination selection to the map. Current guidance is a direct bearing.
 - [ ] Improve character animation, street props and district silhouettes with authored assets and measured GPU budgets.
 

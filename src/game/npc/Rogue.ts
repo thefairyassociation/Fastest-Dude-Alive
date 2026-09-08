@@ -118,6 +118,12 @@ export const ROGUES: RogueDefinition[] = [
     blurb: "Meridian's former emergency-routing commander. Her predictive rescue suit turns every possible escape into a scheduled arrival.",
     taunt: "I have already routed your next three choices. Find a fourth.",
   },
+  {
+    id: "courier", name: "Dispatch runner", codename: "Switchback", archetype: "speedster",
+    health: 16, speed: 110, damage: 12, suit: "#243d4a", accent: "#72d8ca",
+    blurb: "A stolen routing core is leaving the Foundry Belt. Intercept its runner before the handoff.",
+    taunt: "Priority delivery. Clear the lane.",
+  },
 ];
 
 export function rogueById(id: string): RogueDefinition {
@@ -152,6 +158,17 @@ export class Rogue {
 
   health: number;
   alive = true;
+  private courierPath: Vector3[] | null = null;
+  private courierWaypoint = 1;
+  private courierClock = 0;
+
+  configureCourier(path: Vector3[]): void {
+    this.courierPath = path.map(point => point.clone());
+    this.courierWaypoint = 1;
+    this.courierClock = 0;
+    this.health = this.maxHealth;
+  }
+
   /**
    * Set for encounters the player is meant to survive rather than win.
    * A phantom takes no damage, which is a deliberate design statement:
@@ -346,6 +363,7 @@ export class Rogue {
   /** The encounter HUD explains the active traversal counter, not just HP. */
   get tacticHint(): string {
     if (this.phase === "recover" || this.phase === "stagger") return "Recovery window — close the gap and strike";
+    if (this.courierPath) return this.phase === "telegraph" || this.phase === "strike" ? "Ground sweep — jump, then strike during recovery" : "Catch the courier · Focus slows their escape";
     if (this.definition.archetype === "speedster") {
       if (this.attackKind === "sweep" && (this.phase === "telegraph" || this.phase === "strike")) return "Ground sweep — jump over the expanding ring";
       return this.healthRatio <= 0.55 ? "Watch the lane; low-health sweeps must be jumped" : "Leave the marked lane, then punish the recovery";
@@ -383,7 +401,8 @@ export class Rogue {
 
     switch (this.phase) {
       case "approach":
-        this.approach(dt, direction, distance, playerPosition);
+        if (this.courierPath) this.followCourierRoute(dt, direction, playerPosition);
+        else this.approach(dt, direction, distance, playerPosition);
         break;
       case "telegraph":
         if (this.phaseTimer <= 0) {
@@ -438,6 +457,28 @@ export class Rogue {
     out.vulnerable = this.vulnerable;
 
     return out;
+  }
+
+  private followCourierRoute(dt: number, direction: Vector3, playerPosition: Vector3): void {
+    const path = this.courierPath!;
+    const target = path[this.courierWaypoint % path.length]!;
+    const dx = target.x - this.position.x, dz = target.z - this.position.z;
+    const distance = Math.hypot(dx, dz);
+    const speed = Math.min(110, distance / Math.max(dt, 0.001));
+    this.velocity.set(distance > 0.01 ? dx / distance * speed : 0, 0, distance > 0.01 ? dz / distance * speed : 0);
+    if (distance <= 110 * dt + 0.1) this.courierWaypoint++;
+    this.courierClock += dt;
+    // A visible committed ground sweep never takes the courier off its road.
+    if (this.courierClock >= 4.5) {
+      this.courierClock = 0;
+      this.phase = "telegraph"; this.phaseTimer = 0.9;
+      this.attackKind = "sweep";
+      this.attackDirection.copyFrom(direction);
+      this.attackOrigin.copyFrom(this.position);
+      this.landing.copyFrom(playerPosition);
+      this.sweepRadius = 0; this.attackConnected = false;
+      this.velocity.setAll(0); this.outcome.telegraph = true;
+    }
   }
 
   private approach(dt: number, direction: Vector3, distance: number, playerPosition: Vector3): void {
@@ -527,7 +568,7 @@ export class Rogue {
 
     if (this.phaseTimer <= 0) {
       this.phase = "recover";
-      this.phaseTimer = def.archetype === "artillery" ? 1.9 : 1.4;
+      this.phaseTimer = this.courierPath ? 2 : def.archetype === "artillery" ? 1.9 : 1.4;
     }
   }
 

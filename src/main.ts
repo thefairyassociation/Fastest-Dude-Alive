@@ -9,6 +9,10 @@ if (!(canvas instanceof HTMLCanvasElement)) {
 document.title = "Fastest Dude Alive";
 
 const game = new SpeedGame(canvas);
+// Development-only inspection for repeatable traversal and renderer checks.
+if (import.meta.env.DEV && new URLSearchParams(location.search).has("playtest")) {
+  Object.assign(window, { fda: game });
+}
 game.boot().catch((error: unknown) => {
   console.error(error);
   document.getElementById("loading")?.classList.add("is-hidden");

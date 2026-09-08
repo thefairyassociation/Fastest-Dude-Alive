@@ -8,7 +8,7 @@
  */
 
 const KEY = "fastest-dude-alive:profile";
-const VERSION = 3;
+const VERSION = 4;
 
 /**
  * Bounds for anything read back from storage. A profile is user-editable, so
@@ -67,6 +67,9 @@ export interface Profile {
   /** Best time in seconds per free-roam route id. */
   routeBests: Record<string, number>;
   routeReplays: Record<string, RouteReplay>;
+  routeMedals: Record<string, number>;
+  /** Pre-overhaul recordings remain available without consuming the live ghost pool. */
+  legacyRouteReplays: Record<string, RouteReplay>;
   /** Collectible ids the player has picked up. */
   collected: string[];
   /** Rogue ids beaten at least once in free roam. */
@@ -88,6 +91,8 @@ export const DEFAULT_PROFILE: Profile = {
   campaign: { unlocked: 1, completed: [], current: null, choices: {} },
   routeBests: {},
   routeReplays: {},
+  routeMedals: {},
+  legacyRouteReplays: {},
   collected: [],
   roguesBeaten: [],
   totalDistanceMeters: 0,
@@ -260,11 +265,19 @@ export function migrate(raw: unknown): Profile {
     }
   }
 
-  if (source.routeReplays && typeof source.routeReplays === "object") {
-    for (const [id, data] of Object.entries(source.routeReplays).slice(0, MAX_REPLAYS)) {
+  const importReplays = (raw: unknown, target: Record<string, RouteReplay>): void => {
+    if (!raw || typeof raw !== "object") return;
+    for (const [id, data] of Object.entries(raw).slice(0, MAX_REPLAYS)) {
       if (!safeId(id)) continue;
       const replay = validateReplay(data);
-      if (replay && Math.abs(replay.duration - (profile.routeBests[id] ?? -1)) < 0.02) profile.routeReplays[id] = replay;
+      if (replay && Math.abs(replay.duration - (profile.routeBests[id] ?? -1)) < 0.02) target[id] = replay;
+    }
+  };
+  importReplays(source.routeReplays, source.version === undefined || source.version < 4 ? profile.legacyRouteReplays : profile.routeReplays);
+  importReplays(source.legacyRouteReplays, profile.legacyRouteReplays);
+  if (source.routeMedals && typeof source.routeMedals === "object") {
+    for (const [id, rank] of Object.entries(source.routeMedals).slice(0, MAX_IDS)) {
+      if (safeId(id) && Number.isInteger(rank) && rank >= 0 && rank <= 3) profile.routeMedals[id] = rank;
     }
   }
 

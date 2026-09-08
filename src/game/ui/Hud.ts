@@ -28,7 +28,7 @@ export interface HudState {
 const TRAVERSAL_LABEL: Record<string, string> = {
   wall: "Wall run",
   vertical: "Vertical run",
-  slide: "Slide",
+  slide: "Drift",
   air: "Airborne",
   ground: "",
 };
@@ -271,11 +271,11 @@ export class Hud {
     ability("ability-focus", 0, 1, true, state.focusActive, "Hold");
 
     const flow = state.flow;
-    element("flow-panel").classList.toggle("is-hidden", !flow);
+    element("flow-panel").classList.toggle("is-hidden", !flow || !flow.active);
     if (flow) {
       element("flow-score").textContent = `${Math.floor(flow.score).toLocaleString()} ×${flow.multiplier}`;
       element("flow-detail").textContent = flow.active
-        ? `${flow.grace < 2.5 ? "Keep moving!" : "Chain sprint, slide & airtime"} · 600 flow = +12 energy`
+        ? `${flow.grace < 2.5 ? "Keep moving!" : "Chain drifts, roofs & airtime"} · 600 flow = +12 energy`
         : `Sprint to start · session best ${Math.floor(flow.best).toLocaleString()}`;
       element("flow-fill").style.transform = `scaleX(${flow.progress})`;
     }
